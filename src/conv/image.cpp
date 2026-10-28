@@ -740,6 +740,13 @@ bool RunPreview(const Job& job, const Progress& p, Result& r)
     Image img;
     std::vector<uint8_t> bytes, out;
     if (job.outPath.empty()) { r.error = L"No place for the preview."; return false; }
+    if (KindOfPath(job.inputs[0]) == Kind::Pdf) {
+        // A PDF's first page, drawn at the size the preview needs.
+        if (!PdfPreview(job.inputs[0], Opt(job, L"max", 2048), img, r.error)) return false;
+        r.info.Set(L"w", img.w).Set(L"h", img.h);
+        if (!EncodeImage(img, Kind::Png, 0, true, out, r.error)) return false;
+        return WriteOutput(job, job.inputs[0], L"", L".png", out, p, r);
+    }
     if (!DecodeImage(job.inputs[0], img, bytes, r.error)) return false;
     r.info.Set(L"w", img.w).Set(L"h", img.h);
     int longest = std::clamp(Opt(job, L"max", 2048), 64, 8192);
@@ -755,6 +762,9 @@ bool RunPreview(const Job& job, const Progress& p, Result& r)
 
 bool RunMergePdf(const Job& job, const Progress& p, Result& r)
 {
+    // PDFs among the inputs: PDFium joins their pages (pictures become pages first).
+    for (auto& in : job.inputs)
+        if (KindOfPath(in) == Kind::Pdf) return MergeWithPdfium(job, p, r);
     PdfWriter pdf;
     int jq = Opt(job, L"jpegQ", 88);
     for (size_t i = 0; i < job.inputs.size(); i++) {

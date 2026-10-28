@@ -4,12 +4,15 @@ Roda (Malay for "wheel") is a portable, offline file converter for Windows 10 an
 Shift, Ctrl or Alt, and a wheel of options opens under the pointer. Drop the file on an option and it is
 converted or acted on, locally.
 
-> **Status: Phase 2 (first "Lite" version), awaiting hand-tests.** Images, archives and file actions
-> work. PDFs, documents, audio and video come in later phases.
+> **Status: Phase 3, awaiting hand-tests.** Pictures, PDFs, documents, spreadsheets, subtitles,
+> archives and file actions work. Audio and video come in Phase 4.
 
 ## Download
-Not released yet. Builds are a single `Roda.exe` (x64 and ARM64): no installer, no admin rights, no
-runtime. Run it from any folder, including a USB stick; delete the folder to remove it.
+Not released yet. Two builds, for x64 and ARM64, neither needing an installer, admin rights or a runtime:
+
+- **Full** (a zip): `Roda.exe` plus `engines\pdfium.dll` for PDFs. Unzip it anywhere, including a USB
+  stick; delete the folder to remove it.
+- **Lite**: `Roda.exe` alone, everything except PDFs (the PDF options are simply not shown).
 
 ## How to use
 1. Start `Roda.exe`. A wheel icon appears in the tray.
@@ -38,9 +41,23 @@ Actions wheel.
 - **Tools** (pictures): Compress (a quality slider), 50%, 1920 px, 1080 px, Size… (width/height),
   Crop (drag a rectangle; free, 1:1, 4:3, 16:9), Rotate, Flip, Strip info, Merge PDF.
   Archives (ZIP, TAR, TAR.GZ, GZ): Extract, into a new folder named after the archive.
+- **PDFs** (Full build). Convert: PNG and JPG (every page at 300 DPI: one file for a one-page PDF,
+  otherwise a folder named after the PDF), TXT, MD (headings, lists, bold and italic recovered from the
+  fonts), DOCX (the text, plus the PDF's pictures), EPUB, PPTX (one slide per page, as a picture).
+  Tools: Split (a PDF per page), Images (the pictures inside, JPEGs as they are), Rotate (every page a
+  quarter turn), Merge PDF (PDFs and pictures, in the order dropped). Float shows the first page.
+- **Documents**: DOCX → HTML, MD, TXT, EPUB. Markdown → HTML, DOCX, TXT, EPUB. HTML → MD, TXT, DOCX.
+  RTF → TXT, HTML, MD, DOCX. TXT → DOCX, EPUB, HTML. Headings, paragraphs, bold, italic, links, lists,
+  tables, quotes, code and pictures carry over where both formats have them.
+- **Spreadsheets**: XLSX, ODS, CSV, TSV and old XLS → XLSX, ODS, CSV, TSV. Values travel (text, numbers,
+  true/false, dates; formulas as their last result), formatting doesn't. Every sheet is kept; to CSV or
+  TSV each sheet becomes its own file in a folder when there are several. CSVs with semicolons (as Excel
+  writes them in many countries) are recognised. CSV comes out as UTF-8 with the mark Excel needs.
+- **Subtitles**: SRT ↔ VTT, both → TXT (just the words).
 - **Actions** (anything): Copy to…, Move to… (with Explorer's own progress, conflict questions and
-  undo), the last three "Copy to" folders, Copy path, Terminal, Float (a picture that stays on top: drag
-  to move, mouse wheel or corners to resize, double-click to open, Esc to close), ZIP, TAR.GZ, TAR.
+  undo), the last three "Copy to" folders, Copy path, Terminal, Float (a picture or a PDF's first page
+  that stays on top: drag to move, mouse wheel or corners to resize, double-click to open, Esc to
+  close), ZIP, TAR.GZ, TAR.
 
 Results go next to the original, under a new name (`photo.webp`, `photo (1).webp`, `photo compressed.jpg`,
 ...). The original is never changed or replaced. Unfinished results are written as `*.part` and only
@@ -57,7 +74,9 @@ Good to know:
 
 Known limits: a drag from an app running as administrator can't open the wheel (Windows does not let a
 normal app receive drops from an elevated one); don't run Roda as administrator to get around it.
-Not yet: RAR extraction, AVIF/HEIC output, Share, PDFs and documents (Phase 3), audio and video (Phase 4).
+A PDF made of scanned pages has no text to extract (no OCR); password-protected PDFs are refused with a
+plain message. Not yet: RAR extraction, AVIF/HEIC output, Share, PDF to XLSX, PDF compression, DOCX →
+PDF (comes with Office support), audio and video (Phase 4).
 
 ## Privacy & permissions
 Roda makes **no network connections**: no telemetry, no update checks, nothing is uploaded.
@@ -73,6 +92,7 @@ What it touches:
 - **Files you drop:** read to convert them, by a separate `Roda.exe --worker` process per job (at
   below-normal priority), so a damaged file can only stop its own worker. Results are written next to
   the original, or in `outputFolder` if you set one. Copy to / Move to use Explorer's own file engine.
+  PDFs are read by `engines\pdfium.dll`, which only workers load, by its full path, when a PDF is opened.
 - **Clipboard:** written only by *Copy path*.
 - **Programs started:** Windows Terminal (or Command Prompt) for *Terminal*; the default app for a result
   when you click *Open*; Explorer for *Show in folder*.
@@ -93,6 +113,10 @@ For scripts and tests (`start /wait` from cmd, as Roda.exe is a Windows app):
     Roda.exe --convert photo.jpg out.jpg --op tool.resize --option w=800
     Roda.exe --convert folder notes.txt pack.zip
     Roda.exe --convert pack.zip outdir\
+    Roda.exe --convert report.pdf report.docx
+    Roda.exe --convert report.pdf outdir\ --op to.png --option dpi=150
+    Roda.exe --convert report.pdf outdir\ --op pdf.split
+    Roda.exe --convert book.xlsx book.csv
     Roda.exe --info photo.webp
 
 It exits with 0 on success, 1 when the file could not be converted (with an `error:` line), 2 for bad
@@ -105,7 +129,8 @@ set `ZIG=zig` to use the one on your `PATH`.
     ./build.sh [outdir] [x64|arm64|all]    # -> out/x64/Roda.exe, out/arm64/Roda.exe
     bash tests/run_tests.sh out/x64/Roda.exe
 
-`tests/run_tests.sh` converts every sample in `tests/corpus` to every format and through every tool, and
+`tests/run_tests.sh` converts every sample in `tests/corpus` (pictures, PDFs, documents, spreadsheets,
+subtitles, archives) to every format and through every tool, and
 checks the results decode again with the right size; broken files must fail cleanly. Trigger self-test:
 `tests/dragtest.cpp` plays real drags with injected input (it moves the pointer); results of the Phase 1
 run are in [tests/phase1-results.md](tests/phase1-results.md).

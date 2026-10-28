@@ -103,6 +103,105 @@ mkdir -p "$WORK/arch/evil"
 roda --convert "$(win "$CORPUS/evil.zip")" "$(win "$WORK/arch/evil")\\"
 [ -f "$WORK/arch/evil/evil/ok.txt" ] && [ ! -e "$WORK/arch/escaped.txt" ] && [ ! -e "$WORK/arch/evil/escaped.txt" ] && ok || bad "zip with ../ escaped its folder"
 
+# ---------------------------------------------------------------- PDFs (when engines/pdfium.dll is next to the exe)
+has() { grep -qF -- "$2" "$1" && ok || bad "$(basename "$1") lacks '$2'"; }
+lacks() { grep -qF -- "$2" "$1" && bad "$(basename "$1") has '$2'" || ok; }
+count() { ls "$1" 2>/dev/null | wc -l | tr -d ' '; }
+mkdir -p "$WORK/pdf"
+if [ -f "$(dirname "$EXE")/engines/pdfium.dll" ]; then
+  P="$WORK/pdf"
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P")\\" --op to.png
+  [ $RC -eq 0 ] && [ "$(count "$P/report")" = "3" ] && ok || bad "PDF to PNG: $OUT"
+  info "$P/report/report page 1.png"; [ "$(field w)x$(field h)" = "2480x3508" ] && ok || bad "A4 at 300 DPI is $(field w)x$(field h)"
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/r.jpg")" --op to.jpg; [ $RC -eq 0 ] && ok || bad "PDF to JPG: $OUT"
+  convert "$CORPUS/report.pdf" "$P/r.txt" && { has "$P/r.txt" "first paragraph of the document. It is long enough"; has "$P/r.txt" "Page three."; }
+  convert "$CORPUS/report.pdf" "$P/r.md" && { has "$P/r.md" "# Introduction"; has "$P/r.md" "- First point"; has "$P/r.md" "**bold**"; has "$P/r.md" "*italic*"; }
+  convert "$CORPUS/report.pdf" "$P/r.docx" && { [ "$(field entries)" -ge 8 ] && ok || bad "PDF to DOCX: $INFO"; }
+  convert "$P/r.docx" "$P/r-docx.txt" --op to.txt && has "$P/r-docx.txt" "Page two text."
+  convert "$CORPUS/report.pdf" "$P/r.epub" && ok
+  convert "$CORPUS/report.pdf" "$P/r.pptx" && { unzip -l "$P/r.pptx" | grep -q "ppt/slides/slide3.xml" && ok || bad "PPTX has no third slide"; }
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P")\\" --op pdf.split
+  [ $RC -eq 0 ] && [ "$(count "$P/report pages")" = "3" ] && ok || bad "split: $OUT"
+  info "$P/report pages/report page 2.pdf"; [ "$(field pages)" = "1" ] && ok || bad "split page: $INFO"
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P")\\" --op pdf.images
+  [ $RC -eq 0 ] && [ -f "$P/report images/report image 1.jpg" ] && ok || bad "extract images: $OUT $(ls "$P/report images" 2>&1)"
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/rot.pdf")" --op pdf.rotate
+  info "$P/rot.pdf"; [ "$(field pages)" = "3" ] && ok || bad "rotate: $INFO"
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$CORPUS/photo.jpg")" "$(win "$CORPUS/long.pdf")" "$(win "$P/merged.pdf")"
+  info "$P/merged.pdf"; [ "$(field pages)" = "304" ] && ok || bad "merge PDFs and a picture: $INFO"
+  convert "$CORPUS/long.pdf" "$P/long.txt" && { [ "$(grep -c 'of 300' "$P/long.txt")" = "300" ] && ok || bad "300-page PDF text"; }
+  roda --convert "$(win "$CORPUS/long.pdf")" "$(win "$P")\\" --op to.png --option dpi=36
+  [ $RC -eq 0 ] && [ "$(count "$P/long")" = "300" ] && ok || bad "300 pages to PNG: $OUT"
+  for bad in password.pdf broken.pdf; do
+    roda --convert "$(win "$CORPUS/$bad")" "$(win "$P/$bad.txt")"
+    [ $RC -eq 1 ] && [[ "$OUT" == error:* ]] && [ ! -e "$P/$bad.txt" ] && ok || bad "$bad: rc=$RC '$OUT'"
+  done
+  [[ "$(roda --convert "$(win "$CORPUS/password.pdf")" "$(win "$P/x.txt")"; echo "$OUT")" == *"password protected"* ]] && ok || bad "password message"
+else
+  echo "(no engines/pdfium.dll next to the exe: PDF tests skipped)"
+fi
+
+# ---------------------------------------------------------------- documents
+D="$WORK/doc"; mkdir -p "$D"
+for pair in "sample.docx html" "sample.docx md" "sample.docx txt" "sample.docx epub" "sample.md html" "sample.md docx" "sample.md txt" "sample.md epub" \
+            "sample.html md" "sample.html txt" "sample.html docx" "sample.rtf txt" "sample.rtf html" "sample.rtf md" "sample.rtf docx" \
+            "sample.txt docx" "sample.txt epub" "sample.txt html"; do
+  set -- $pair
+  roda --convert "$(win "$CORPUS/$1")" "$(win "$D/${1%.*}-${1##*.}.$2")"
+  [ $RC -eq 0 ] && [ -s "$D/${1%.*}-${1##*.}.$2" ] && ok || bad "$1 -> $2: $OUT"
+done
+has "$D/sample-docx.md" "Plain, **bold** and *italic* words."
+has "$D/sample-docx.md" "- Bullet one"
+has "$D/sample-docx.md" "2. Step two"
+has "$D/sample-docx.md" "| Width | 42 |"
+has "$D/sample-docx.html" "data:image/png;base64,"
+has "$D/sample-md.html" "<table>"
+has "$D/sample-md.html" "ünïcödé"
+has "$D/sample-html.md" "Café €5"
+has "$D/sample-html.md" "[link](https://example.com)"
+lacks "$D/sample-html.md" "no</p>"
+lacks "$D/sample-html.md" "comment"
+has "$D/sample-html.md" "   - inner"
+has "$D/sample-rtf.txt" "café and € euro."
+has "$D/sample-rtf.md" "# RTF sample"
+has "$D/sample-rtf.md" "Plain, **bold** and *italic*"
+# Round trips through Roda's own DOCX and EPUB.
+convert "$D/sample-md.docx" "$D/md-docx.txt" --op to.txt && { has "$D/md-docx.txt" "code block"; has "$D/md-docx.txt" "nested"; }
+convert "$D/sample-md.docx" "$D/md-docx.md" --op to.md && { has "$D/md-docx.md" "## List"; has "$D/md-docx.md" "1. first"; }
+unzip -p "$D/sample-docx.epub" mimetype | grep -qx "application/epub+zip" && ok || bad "EPUB mimetype"
+unzip -l "$D/sample-docx.epub" | grep -q "OEBPS/nav.xhtml" && ok || bad "EPUB without a table of contents"
+
+# ---------------------------------------------------------------- spreadsheets
+S="$WORK/sheet"; mkdir -p "$S"
+for f in sample.xlsx sample.ods sample.csv sample.tsv sample.xls semicolon.csv; do
+  for t in xlsx ods csv tsv; do
+    [ "${f##*.}" = "$t" ] && continue
+    out="$S/${f%.*}-${f##*.}.$t"
+    roda --convert "$(win "$CORPUS/$f")" "$(win "$out")" --op to.$t
+    [ $RC -eq 0 ] && ok || bad "$f -> $t: $OUT"
+  done
+done
+# A two-sheet workbook to CSV: a folder with a file per sheet.
+roda --convert "$(win "$CORPUS/sample.xlsx")" "$(win "$S")\\" --op to.csv
+[ $RC -eq 0 ] && [ "$(count "$S/sample")" = "2" ] && ok || bad "two sheets to CSV: $OUT"
+has "$S/sample/sample - Data.csv" '"has ""quotes"", commas"'
+has "$S/sample/sample - Data.csv" "2024-05-17 14:30:00"
+has "$S/sample-csv.tsv" "007"
+has "$S/semicolon-csv.tsv" "bread	2,50"
+has "$S/sample-ods.csv" "x,12.5"
+[ "$(wc -l < "$S/sample-ods.csv")" -le 3 ] && ok || bad "ODS repeated empty rows were written out"
+roda --convert "$(win "$CORPUS/sample.xls")" "$(win "$S")\\" --op to.csv
+has "$S/sample (1)/sample - Data.csv" "2024-05-17"
+convert "$S/sample-csv.xlsx" "$S/csv-xlsx.csv" --op to.csv && has "$S/csv-xlsx.csv" "two"
+
+# ---------------------------------------------------------------- subtitles
+T2="$WORK/sub"; mkdir -p "$T2"
+convert "$CORPUS/sample.srt" "$T2/a.vtt" --op to.vtt && { has "$T2/a.vtt" "WEBVTT"; has "$T2/a.vtt" "00:00:01.000 --> 00:00:03.500"; }
+convert "$T2/a.vtt" "$T2/b.srt" --op to.srt && has "$T2/b.srt" "00:00:04,000 --> 00:00:06,000"
+convert "$CORPUS/sample.vtt" "$T2/c.srt" --op to.srt && { has "$T2/c.srt" "Hi & welcome."; lacks "$T2/c.srt" "align:"; }
+convert "$CORPUS/sample.vtt" "$T2/d.txt" --op to.txt && has "$T2/d.txt" "Second cue."
+convert "$CORPUS/sample.srt" "$T2/e.txt" --op to.txt && { has "$T2/e.txt" "Hello there."; has "$T2/e.txt" "Two lines of text."; }
+
 # ---------------------------------------------------------------- broken files fail cleanly
 for in in empty.png truncated.png garbage.jpg; do
   roda --convert "$(win "$CORPUS/$in")" "$(win "$WORK/broken-$in.webp")"

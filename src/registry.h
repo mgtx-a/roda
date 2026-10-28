@@ -10,13 +10,17 @@ enum class WheelKind { Convert, Tools, Actions };
 const wchar_t* WheelName(WheelKind k);
 
 enum class Kind : uint8_t {
-    Unknown, Folder, Jpeg, Png, Webp, Gif, Bmp, Tiff, Ico, Svg, Heic, Avif, Zip, Tar, Gzip, Rar, Pdf, Count
+    Unknown, Folder, Jpeg, Png, Webp, Gif, Bmp, Tiff, Ico, Svg, Heic, Avif, Zip, Tar, Gzip, Rar, Pdf,
+    Docx, Markdown, Html, Rtf, Txt, Xlsx, Ods, Csv, Tsv, Xls, Srt, Vtt, Count
 };
-using KindSet = uint32_t;
+using KindSet = uint64_t;
 constexpr KindSet Bit(Kind k) { return KindSet(1) << unsigned(k); }
 constexpr KindSet kImages = Bit(Kind::Jpeg) | Bit(Kind::Png) | Bit(Kind::Webp) | Bit(Kind::Gif) | Bit(Kind::Bmp) | Bit(Kind::Tiff) |
                             Bit(Kind::Ico) | Bit(Kind::Svg) | Bit(Kind::Heic) | Bit(Kind::Avif);
 constexpr KindSet kAnything = ~KindSet(0);
+constexpr KindSet kDocs = Bit(Kind::Docx) | Bit(Kind::Markdown) | Bit(Kind::Html) | Bit(Kind::Rtf) | Bit(Kind::Txt);
+constexpr KindSet kSheets = Bit(Kind::Xlsx) | Bit(Kind::Ods) | Bit(Kind::Csv) | Bit(Kind::Tsv) | Bit(Kind::Xls);
+constexpr KindSet kSubtitles = Bit(Kind::Srt) | Bit(Kind::Vtt);
 
 Kind KindFromExtension(const wstring& path);
 /// From the first bytes of a file; falls back to the extension when they say nothing.
@@ -27,7 +31,12 @@ Kind KindOfPath(const wstring& path);
 const wchar_t* KindLabel(Kind k);              // "PNG"
 inline bool IsImage(Kind k) { return (Bit(k) & kImages) != 0; }
 
-enum class Icon : uint8_t { None, Compress, Resize, Crop, Rotate, Flip, Strip, Merge, Extract, Copy, Move, Folder, Path, Terminal, Float, Share, Archive };
+enum class Icon : uint8_t { None, Compress, Resize, Crop, Rotate, Flip, Strip, Merge, Extract, Copy, Move, Folder, Path, Terminal, Float, Share, Archive, Split, Images };
+
+/// Optional engines: DLLs in the "engines" folder next to Roda.exe (the Full build).
+enum class Engine : uint8_t { None, Pdfium };
+bool EngineAvailable(Engine e);   // the DLL is there (checked once)
+wstring EnginePath(Engine e);
 enum class Popup : uint8_t { None, Quality, Size, Crop };
 
 // ---------------------------------------------------------------- jobs
@@ -68,6 +77,7 @@ struct Converter {
     int minItems, maxItems;           // maxItems 0: no limit
     Popup popup;
     bool (*run)(const Job&, const Progress&, Result&);   // null for actions (run by the UI)
+    Engine needs = Engine::None;      // hidden when this engine is missing
 };
 
 const std::vector<Converter>& Converters();

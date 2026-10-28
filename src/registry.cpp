@@ -35,6 +35,18 @@ Kind KindFromExtension(const wstring& path)
     if (e == L".gz" || e == L".tgz") return Kind::Gzip;
     if (e == L".rar") return Kind::Rar;
     if (e == L".pdf") return Kind::Pdf;
+    if (e == L".docx") return Kind::Docx;
+    if (e == L".md" || e == L".markdown") return Kind::Markdown;
+    if (e == L".html" || e == L".htm" || e == L".xhtml") return Kind::Html;
+    if (e == L".rtf") return Kind::Rtf;
+    if (e == L".txt" || e == L".text") return Kind::Txt;
+    if (e == L".xlsx") return Kind::Xlsx;
+    if (e == L".ods") return Kind::Ods;
+    if (e == L".csv") return Kind::Csv;
+    if (e == L".tsv" || e == L".tab") return Kind::Tsv;
+    if (e == L".xls") return Kind::Xls;
+    if (e == L".srt") return Kind::Srt;
+    if (e == L".vtt") return Kind::Vtt;
     return Kind::Unknown;
 }
 
@@ -56,16 +68,21 @@ Kind KindFromBytes(const uint8_t* p, size_t n, const wstring& path)
         if (at(8, "heic") || at(8, "heix") || at(8, "mif1") || at(8, "msf1") || at(8, "heim") || at(8, "heis") || at(8, "hevc")) return Kind::Heic;
     }
     if (at(0, "PK\x03\x04") || at(0, "PK\x05\x06")) {
+        // .docx, .xlsx and .ods are zips too: the name says which.
         Kind e = KindFromExtension(path);
-        return e == Kind::Unknown ? Kind::Zip : (e == Kind::Zip ? Kind::Zip : Kind::Unknown);   // .docx, .xlsx and friends are zips too
+        return e == Kind::Docx || e == Kind::Xlsx || e == Kind::Ods ? e : Kind::Zip;
     }
+    if (at(0, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")) return KindFromExtension(path) == Kind::Xls ? Kind::Xls : Kind::Unknown;   // old Office files
+    if (at(0, "{\\rtf")) return Kind::Rtf;
+    if (at(0, "WEBVTT") || at(3, "WEBVTT")) return Kind::Vtt;
     if (at(0, "\x1f\x8b")) return Kind::Gzip;
     if (at(0, "Rar!\x1a\x07")) return Kind::Rar;
     if (at(257, "ustar")) return Kind::Tar;
     if (at(0, "%PDF-")) return Kind::Pdf;
     Kind e = KindFromExtension(path);
-    if (e == Kind::Svg) return Kind::Svg;   // text: trust the name
-    if (e == Kind::Tar) return Kind::Tar;   // old tars have no magic
+    // Text formats have no magic: trust the name. Old tars have none either.
+    if (e == Kind::Svg || e == Kind::Tar || e == Kind::Markdown || e == Kind::Html || e == Kind::Txt || e == Kind::Csv ||
+        e == Kind::Tsv || e == Kind::Srt) return e;
     return Kind::Unknown;   // the name says one thing, the bytes another (or nothing): don't guess
 }
 
@@ -88,7 +105,8 @@ Kind KindOfPath(const wstring& path)
 const wchar_t* KindLabel(Kind k)
 {
     static const wchar_t* names[] = { L"", L"folder", L"JPG", L"PNG", L"WEBP", L"GIF", L"BMP", L"TIFF", L"ICO", L"SVG",
-                                      L"HEIC", L"AVIF", L"ZIP", L"TAR", L"GZIP", L"RAR", L"PDF" };
+                                      L"HEIC", L"AVIF", L"ZIP", L"TAR", L"GZIP", L"RAR", L"PDF", L"DOCX", L"Markdown", L"HTML",
+                                      L"RTF", L"TXT", L"XLSX", L"ODS", L"CSV", L"TSV", L"XLS", L"SRT", L"VTT" };
     return unsigned(k) < sizeof names / sizeof names[0] ? names[unsigned(k)] : L"";
 }
 
@@ -132,14 +150,27 @@ using C = Converter;
 const std::vector<Converter>& Converters()
 {
     static const std::vector<Converter> table = {
-        // Convert: one output per input. AVIF and HEIC output need encoders Roda doesn't ship yet.
-        { L"to.jpg",  WheelKind::Convert, L"JPG",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunToImage },
-        { L"to.png",  WheelKind::Convert, L"PNG",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunToImage },
-        { L"to.webp", WheelKind::Convert, L"WEBP", kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunToImage },
-        { L"to.pdf",  WheelKind::Convert, L"PDF",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunToImage },
-        { L"to.tiff", WheelKind::Convert, L"TIFF", kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunToImage },
-        { L"to.bmp",  WheelKind::Convert, L"BMP",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunToImage },
-        { L"to.ico",  WheelKind::Convert, L"ICO",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunToImage },
+        // Convert: one output per input, named after the target. A PDF only shows up on these wheels
+        // when PDFium is there. AVIF and HEIC output need encoders Roda doesn't ship yet.
+        { L"to.jpg",  WheelKind::Convert, L"JPG",  kImages | Bit(Kind::Pdf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.png",  WheelKind::Convert, L"PNG",  kImages | Bit(Kind::Pdf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.webp", WheelKind::Convert, L"WEBP", kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.pdf",  WheelKind::Convert, L"PDF",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.tiff", WheelKind::Convert, L"TIFF", kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.bmp",  WheelKind::Convert, L"BMP",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.ico",  WheelKind::Convert, L"ICO",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.docx", WheelKind::Convert, L"DOCX", Bit(Kind::Pdf) | Bit(Kind::Markdown) | Bit(Kind::Txt) | Bit(Kind::Html) | Bit(Kind::Rtf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.html", WheelKind::Convert, L"HTML", Bit(Kind::Docx) | Bit(Kind::Markdown) | Bit(Kind::Rtf) | Bit(Kind::Txt), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.md",   WheelKind::Convert, L"MD",   Bit(Kind::Pdf) | Bit(Kind::Docx) | Bit(Kind::Html) | Bit(Kind::Rtf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.txt",  WheelKind::Convert, L"TXT",  Bit(Kind::Pdf) | kDocs | kSubtitles, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.epub", WheelKind::Convert, L"EPUB", Bit(Kind::Pdf) | Bit(Kind::Docx) | Bit(Kind::Txt) | Bit(Kind::Markdown), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.pptx", WheelKind::Convert, L"PPTX", Bit(Kind::Pdf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.xlsx", WheelKind::Convert, L"XLSX", kSheets, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.ods",  WheelKind::Convert, L"ODS",  kSheets, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.csv",  WheelKind::Convert, L"CSV",  kSheets, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.tsv",  WheelKind::Convert, L"TSV",  kSheets, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.srt",  WheelKind::Convert, L"SRT",  kSubtitles, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.vtt",  WheelKind::Convert, L"VTT",  kSubtitles, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
 
         // Tools.
         { L"tool.compress",   WheelKind::Tools, L"Compress",    kCompressible, Icon::Compress, C::PerFile, 1, 0, Popup::Quality, RunImageTool },
@@ -151,7 +182,10 @@ const std::vector<Converter>& Converters()
         { L"tool.rotate",     WheelKind::Tools, L"Rotate",      kImages, Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunImageTool },
         { L"tool.flip",       WheelKind::Tools, L"Flip",        kImages, Icon::Flip, C::PerFile, 1, 0, Popup::None, RunImageTool },
         { L"tool.strip",      WheelKind::Tools, L"Strip info",  kStrippable, Icon::Strip, C::PerFile, 1, 0, Popup::None, RunImageTool },
-        { L"tool.mergepdf",   WheelKind::Tools, L"Merge PDF",   kImages, Icon::Merge, C::AllInOne, 2, 0, Popup::None, RunMergePdf },
+        { L"tool.mergepdf",   WheelKind::Tools, L"Merge PDF",   kImages | Bit(Kind::Pdf), Icon::Merge, C::AllInOne, 2, 0, Popup::None, RunMergePdf },
+        { L"pdf.split",       WheelKind::Tools, L"Split",       Bit(Kind::Pdf), Icon::Split, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
+        { L"pdf.images",      WheelKind::Tools, L"Images",      Bit(Kind::Pdf), Icon::Images, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
+        { L"pdf.rotate",      WheelKind::Tools, L"Rotate",      Bit(Kind::Pdf), Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"tool.extract",    WheelKind::Tools, L"Extract",     kArchives, Icon::Extract, C::PerFile, 1, 0, Popup::None, RunExtract },
 
         // Actions: anything, folders and mixed selections included. Run by the UI, except packing.
@@ -161,7 +195,7 @@ const std::vector<Converter>& Converters()
         { L"act.copyrecent", WheelKind::Actions, L"",        kAnything, Icon::Folder, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.copypath", WheelKind::Actions, L"Copy path", kAnything, Icon::Path, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.terminal", WheelKind::Actions, L"Terminal",  kAnything, Icon::Terminal, C::Action, 1, 0, Popup::None, nullptr },
-        { L"act.float",    WheelKind::Actions, L"Float",     kImages, Icon::Float, C::Action, 1, 1, Popup::None, nullptr },
+        { L"act.float",    WheelKind::Actions, L"Float",     kImages | Bit(Kind::Pdf), Icon::Float, C::Action, 1, 1, Popup::None, nullptr },
         { L"pack.zip",     WheelKind::Actions, L"ZIP",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         { L"pack.targz",   WheelKind::Actions, L"TAR.GZ",    kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         { L"pack.tar",     WheelKind::Actions, L"TAR",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
@@ -169,6 +203,19 @@ const std::vector<Converter>& Converters()
         { L"prep.preview", WheelKind::Actions, L"", 0, Icon::None, C::PerFile, 1, 1, Popup::None, RunPreview },
     };
     return table;
+}
+
+wstring EnginePath(Engine e)
+{
+    return e == Engine::Pdfium ? JoinPath(ExeDir(), L"engines\\pdfium.dll") : L"";
+}
+
+bool EngineAvailable(Engine e)
+{
+    if (e == Engine::None) return true;
+    static int pdfium = -1;   // looked for once: the folder doesn't change while Roda runs
+    if (pdfium < 0) pdfium = GetFileAttributesW(EnginePath(Engine::Pdfium).c_str()) != INVALID_FILE_ATTRIBUTES;
+    return pdfium == 1;
 }
 
 const Converter* FindConverter(const wstring& id)
@@ -186,8 +233,12 @@ std::vector<WheelOption> OptionsFor(WheelKind wheel, const std::vector<Kind>& ki
     bool allSame = true;
     for (Kind k : kinds) { all |= Bit(k); allSame = allSame && k == kinds[0]; }
     int n = int(kinds.size());
+    // Without PDFium, PDFs are read by nothing: no row accepts them.
+    KindSet readable = EngineAvailable(Engine::Pdfium) ? kAnything : ~Bit(Kind::Pdf);
     for (auto& c : Converters()) {
-        if (c.wheel != wheel || (all & ~c.inputs) != 0 || n < c.minItems || (c.maxItems && n > c.maxItems)) continue;
+        KindSet inputs = c.inputs == kAnything ? kAnything : (c.inputs & readable);
+        if (c.wheel != wheel || (all & ~inputs) != 0 || n < c.minItems || (c.maxItems && n > c.maxItems)) continue;
+        if (c.needs != Engine::None && !EngineAvailable(c.needs)) continue;
         // No "PNG" on a wheel of PNGs: converting a file to its own format does nothing useful.
         if (wheel == WheelKind::Convert && allSame) {
             Kind target = KindFromExtension(wstring(L"x.") + (c.id + 3));

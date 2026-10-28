@@ -39,6 +39,8 @@ const char* IconPath(Icon i)
         case Icon::Terminal: return "M3 5 L21 5 L21 19 L3 19 Z M7 9.5 L10 12 L7 14.5 M12.5 15 L17 15";
         case Icon::Float: return "M9 3 L15 3 M10 3 L10 9 L7 13 L17 13 L14 9 L14 3 M12 13 L12 21";
         case Icon::Share: return "O18 5 2.5 O6 12 2.5 O18 19 2.5 M8.2 10.8 L15.8 6.2 M8.2 13.2 L15.8 17.8";
+        case Icon::Split: return "M7 3 L14 3 L17 6 L17 11 L7 11 Z M7 14 L17 14 L17 21 L7 21 Z M3 12.5 L21 12.5";
+        case Icon::Images: return "M3 5 L21 5 L21 19 L3 19 Z M3 16 L9 10 L14 15 L17 12 L21 16 O16 9 1.6";
         case Icon::Archive: return "M4 4 L20 4 L20 20 L4 20 Z M12 4 L12 6 M11 7 L13 7 M12 8 L12 10 M11 11 L13 11 M10 13 L14 13 L14 16.5 L10 16.5 Z";
         default: return nullptr;
     }

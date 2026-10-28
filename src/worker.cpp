@@ -7,6 +7,7 @@
 #include "worker.h"
 
 #include "conv/conv.h"
+#include "conv/pdfium.h"
 #include "json.h"
 #include "registry.h"
 
@@ -89,17 +90,24 @@ int Info(const wstring& path)
         Image img;
         if (!DecodeImage(path, img, bytes, err)) { Print("error: " + Narrow(err) + "\n"); return 1; }
         j.Set(L"w", img.w).Set(L"h", img.h).Set(L"alpha", img.alpha);
-    } else if (k == Kind::Zip) {
+    } else if (k == Kind::Zip || (bytes.size() > 4 && bytes[0] == 'P' && bytes[1] == 'K')) {   // DOCX, XLSX, PPTX, EPUB, ODS are ZIPs too
         mz_zip_archive zip{};
         if (!mz_zip_reader_init_mem(&zip, bytes.data(), bytes.size(), 0)) { Print("error: damaged zip\n"); return 1; }
         j.Set(L"entries", int(mz_zip_reader_get_num_files(&zip)));
         mz_zip_reader_end(&zip);
     } else if (k == Kind::Pdf) {
         std::string s(bytes.begin(), bytes.end());
-        int pages = 0;
-        for (size_t i = 0; (i = s.find("/Type /Page ", i)) != std::string::npos; i++) pages++;
         bool ok = s.rfind("%%EOF") != std::string::npos && s.find("startxref") != std::string::npos;
-        j.Set(L"pages", pages).Set(L"wellFormed", ok);
+        PdfDoc pdf;
+        if (EngineAvailable(Engine::Pdfium)) {
+            // PDFium opens it: the real page count, and proof the file reads back.
+            if (!pdf.OpenMemory(bytes, err)) { Print("error: " + Narrow(err) + "\n"); return 1; }
+            j.Set(L"pages", pdf.pages()).Set(L"wellFormed", ok);
+        } else {
+            int pages = 0;
+            for (size_t i = 0; (i = s.find("/Type /Page ", i)) != std::string::npos; i++) pages++;
+            j.Set(L"pages", pages).Set(L"wellFormed", ok);
+        }
     }
     PrintLine(j);
     return 0;

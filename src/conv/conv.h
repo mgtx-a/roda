@@ -11,6 +11,13 @@ bool RunImageTool(const Job& job, const Progress& p, Result& r);   // "tool.*"
 bool RunMergePdf(const Job& job, const Progress& p, Result& r);    // "tool.mergepdf"
 bool RunPreview(const Job& job, const Progress& p, Result& r);     // "prep.preview": PNG at outPath, info = original size
 
+// convert.cpp, pdfconv.cpp
+bool RunConvert(const Job& job, const Progress& p, Result& r);     // every "to.*": picks the reader by the input's kind
+bool RunPdfTool(const Job& job, const Progress& p, Result& r);     // "pdf.split", "pdf.images", "pdf.rotate"
+bool MergeWithPdfium(const Job& job, const Progress& p, Result& r); // Merge PDF when a PDF is among the inputs
+struct Image;
+bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err);
+
 // archive.cpp
 bool RunPack(const Job& job, const Progress& p, Result& r);        // "pack.zip", "pack.tar", "pack.targz"
 bool RunExtract(const Job& job, const Progress& p, Result& r);     // "tool.extract"

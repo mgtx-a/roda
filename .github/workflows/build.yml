@@ -36,50 +36,61 @@ jobs:
       - name: Test (CLI conversions over tests/corpus)
         run: bash tests/run_tests.sh out/x64/Roda.exe
 
-      - name: Name and checksum
+      - name: Package (Lite exe, Full zip) and checksum
         id: sum
         run: |
           mkdir -p dist
-          cp out/x64/Roda.exe dist/Roda-x64.exe
-          cp out/arm64/Roda.exe dist/Roda-arm64.exe
-          echo "x64=$(sha256sum dist/Roda-x64.exe | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-          echo "arm64=$(sha256sum dist/Roda-arm64.exe | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          for arch in x64 arm64; do
+            cp out/$arch/Roda.exe dist/Roda-$arch.exe
+            # Full: the same exe, plus PDFium in engines\, the licences and the README.
+            full=staging/Roda-$arch
+            mkdir -p $full
+            cp -r out/$arch/Roda.exe out/$arch/engines licenses README.md THIRD_PARTY.md $full/
+            powershell -Command "Compress-Archive -Path '$full\*' -DestinationPath 'dist\Roda-$arch-full.zip' -Force"
+          done
+          {
+            echo "sums<<EOF"
+            (cd dist && sha256sum *)
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:
           name: Roda
-          path: dist/*.exe
+          path: dist/*
 
       - name: Attest build provenance
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/*.exe
+          subject-path: dist/*
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-          X64: ${{ steps.sum.outputs.x64 }}
-          ARM: ${{ steps.sum.outputs.arm64 }}
+          SUMS: ${{ steps.sum.outputs.sums }}
         run: |
           cat > notes.md <<EOF
-          Download **Roda-x64.exe** (most PCs) or **Roda-arm64.exe** (Windows on ARM), then run it.
+          **Full** (pictures, PDFs, documents, spreadsheets, archives): download **Roda-x64-full.zip**
+          (most PCs) or **Roda-arm64-full.zip** (Windows on ARM), unzip it anywhere and run Roda.exe.
+          **Lite** (everything except PDFs, a single file): **Roda-x64.exe** or **Roda-arm64.exe**.
           No installer and no runtime needed (Windows 10 / 11).
 
           Built by GitHub Actions from commit ${GITHUB_SHA}. Verify with:
           \`gh attestation verify Roda-x64.exe --repo ${GITHUB_REPOSITORY}\`
 
           SHA-256:
-          - Roda-x64.exe: \`${X64}\`
-          - Roda-arm64.exe: \`${ARM}\`
+          \`\`\`
+          ${SUMS}
+          \`\`\`
 
           Windows SmartScreen may warn that the app is unrecognised because the exe is not signed:
           choose **More info → Run anyway**.
           EOF
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.exe --clobber
+            gh release upload "$TAG" dist/* --clobber
           else
-            gh release create "$TAG" dist/*.exe --title "Roda ${TAG#v}" --notes-file notes.md --generate-notes
+            gh release create "$TAG" dist/* --title "Roda ${TAG#v}" --notes-file notes.md --generate-notes
           fi

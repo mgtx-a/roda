@@ -9,16 +9,34 @@ none of them is GPL or LGPL.
 | libwebp (incl. sharpyuv) | 1.5.0 | BSD-3-Clause, plus Google's patent grant (`PATENTS`) | https://github.com/webmproject/libwebp/archive/refs/tags/v1.5.0.tar.gz (`668c9aba…ee30f37`*) | WebP decode and encode |
 | lunasvg | 3.2.1 | MIT | https://github.com/sammycage/lunasvg/archive/refs/tags/v3.2.1.tar.gz (`3420175c…5c646af8`*) | Reading SVG (drawn to pixels) |
 | plutovg (lunasvg's renderer) | commit 5e4712cf (0.0.13) | MIT; includes FreeType rasteriser code under the FreeType License (FTL) and stb_truetype / stb_image (public domain or MIT) | https://github.com/sammycage/plutovg/archive/5e4712cf873b0c7829a4a6157763e2ad3ac49164.tar.gz (`556c3a1d…d349fa234`*) | Drawing SVG |
-| miniz | 3.0.2 | MIT | https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip (`ada38db0…5332c5`*) | ZIP read/write, deflate for PDF, gzip |
+| miniz | 3.0.2 | MIT | https://github.com/richgel999/miniz/releases/download/3.0.2/miniz-3.0.2.zip (`ada38db0…5332c5`*) | ZIP read/write, deflate for PDF, gzip, Office files |
+| pugixml | 1.16 | MIT | https://github.com/zeux/pugixml/archive/refs/tags/v1.16.tar.gz (`357bcab8…65090219`*) | Reading DOCX, XLSX and ODS |
+| md4c | 0.5.2 | MIT | https://github.com/mity/md4c/archive/refs/tags/release-0.5.2.tar.gz (`55d0111d…090ef21`*) | Reading Markdown, Markdown to HTML |
+| libxls | 1.6.3 | BSD-2-Clause | https://github.com/libxls/libxls/archive/refs/tags/v1.6.3.tar.gz (`587c9f0e…6eed7`*) | Reading old .xls workbooks |
+
+**PDFium** ships separately, as `engines\pdfium.dll` in the Full build (Roda loads it by full path,
+only in a worker, only for PDFs; without it the PDF options are hidden):
+
+| Component | Version | Licence | Source (archive SHA-256) |
+|---|---|---|---|
+| PDFium, prebuilt by bblanchon/pdfium-binaries | chromium/8100 | BSD-3-Clause (PDFium) and Apache-2.0; the build's own parts under their licences: FreeType (FTL), libjpeg-turbo (IJG/BSD), OpenJPEG (BSD-2), libpng, zlib, lcms (MIT), HarfBuzz (MIT), ICU (Unicode), Abseil (Apache-2.0), AGG, fast_float, dragonbox, simdutf | https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium%2F8100 — x64 `51621bcc1d9be9ea448f4b84b0516862b928e3968d3fca899af1a6d6e2848d6d`, ARM64 `cca9b28d406ae2a902b0b710a92ab699c4c2931564ab6efe44630014d492a9ca` |
+
+Its licence texts are in [`licenses/pdfium/`](licenses/pdfium). (ICU's text mentions the GPL only for
+its build scripts, which are not part of the DLL.) Its headers are vendored in `third_party/pdfium`; the DLL
+is downloaded by `build.sh` and checked against the SHA-256 above.
 
 \* Shortened; full hashes:
 - libwebp: `668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37`
 - lunasvg: `3420175c9632007edfcd0198001abc116c5c646af8e928d393cd029985cc4ee8`
 - plutovg: `556c3a1da41154516340f987bffe872dde7b596a4908e29b3b29489d349fa234`
 - miniz: `ada38db0b703a56d3dd6d57bf84a9c5d664921d870d8fea4db153979fb5332c5`
+- pugixml: `357bcab8877dc9943f355d3a72daba1b053238ba955f50fa81586afb65090219`
+- md4c: `55d0111d48fb11883aaee91465e642b8b640775a4d6993c2d0e7a8092758ef21`
+- libxls: `587c9f0ebb5647eb68ec1e0ed8c3f7f6102622d6dd83473a21d3a36dee04eed7`
 
 The vendored copies are trimmed to what Roda compiles (sources, headers, licence files); nothing in them
-is modified.
+is modified. libxls's `locale.c` is left out and replaced by `src/shim/xls_locale.c` (Roda's own,
+Windows' UTF-8 conversion), with a `config.h` of our own in `src/shim`.
 
 The FreeType License asks for credit in the documentation: *Portions of this software are copyright
 © The FreeType Project (www.freetype.org). All rights reserved.*

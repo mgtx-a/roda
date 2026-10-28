@@ -3,3 +3,4 @@ data/
 *.pdb
 *.exe
 !tests/corpus/**
+third_party/pdfium-bin/
