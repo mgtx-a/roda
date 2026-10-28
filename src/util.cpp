@@ -494,6 +494,13 @@ void Settings::Save() const
     num("hotkeyKey", hotkeyKey);
     j += "  \"outputFolder\": "; AppendJsonString(j, outputFolder); j += ",\n";
     flag("keepMetadata", keepMetadata);
+    num("jpegQuality", jpegQuality);
+    num("webpQuality", webpQuality);
+    num("compressQuality", compressQuality);
+    for (size_t i = 0; i < 3; i++) {
+        std::string k = "recentFolder" + std::to_string(i + 1);
+        j += "  \""; j += k; j += "\": "; AppendJsonString(j, i < recentFolders.size() ? recentFolders[i] : wstring()); j += ",\n";
+    }
     flag("paused", paused);
     j += "  \"welcomed\": "; j += welcomed ? "true" : "false"; j += "\n}\n";
     EnsureDir(DataDir());
@@ -514,6 +521,13 @@ Settings Settings::Load()
     s.hotkeyKey = ParseInt(j, "hotkeyKey", s.hotkeyKey);
     s.outputFolder = ParseString(j, "outputFolder");
     s.keepMetadata = ParseBool(j, "keepMetadata", s.keepMetadata);
+    s.jpegQuality = std::clamp(ParseInt(j, "jpegQuality", s.jpegQuality), 1, 100);
+    s.webpQuality = std::clamp(ParseInt(j, "webpQuality", s.webpQuality), 1, 100);
+    s.compressQuality = std::clamp(ParseInt(j, "compressQuality", s.compressQuality), 1, 100);
+    for (int i = 1; i <= 3; i++) {
+        wstring f = ParseString(j, ("recentFolder" + std::to_string(i)).c_str());
+        if (!f.empty()) s.recentFolders.push_back(f);
+    }
     s.paused = ParseBool(j, "paused", s.paused);
     s.welcomed = ParseBool(j, "welcomed", s.welcomed);
     return s;

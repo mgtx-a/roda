@@ -67,15 +67,6 @@ std::vector<const wchar_t*> PlaceholderOptions(WheelKind k)
 
 }  // namespace
 
-const wchar_t* WheelName(WheelKind k)
-{
-    switch (k) {
-        case WheelKind::Convert: return L"Convert";
-        case WheelKind::Tools: return L"Tools";
-        default: return L"Actions";
-    }
-}
-
 // ---------------------------------------------------------------- drop target
 
 class WheelDropTarget : public DropTarget {

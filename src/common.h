@@ -115,6 +115,9 @@ struct Settings {
     int hotkeyMods = MOD_CONTROL | MOD_ALT, hotkeyKey = 'R';
     wstring outputFolder;      // empty: next to the source file
     bool keepMetadata = true;
+    int jpegQuality = 88, webpQuality = 82;   // conversions
+    int compressQuality = 70;                 // the Compress tool's starting point, remembered
+    std::vector<wstring> recentFolders;       // "Copy to" targets, newest first, at most 3
     bool paused = false;
     bool welcomed = false;
     static Settings Load();

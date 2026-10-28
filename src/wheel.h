@@ -3,11 +3,9 @@
 #include "anim.h"
 #include "common.h"
 #include "gfx.h"
+#include "registry.h"
 
 namespace rd {
-
-enum class WheelKind { Convert, Tools, Actions };
-const wchar_t* WheelName(WheelKind k);
 
 class WheelDropTarget;
 

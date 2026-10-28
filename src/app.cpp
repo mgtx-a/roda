@@ -5,6 +5,7 @@
 #include "gfx.h"
 #include "input.h"
 #include "wheel.h"
+#include "worker.h"
 
 #include <mutex>
 
@@ -302,6 +303,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int)
     using namespace rd;
     // Engine DLLs are only ever loaded by full path; this keeps the current folder out of the search too.
     SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_USER_DIRS);
+
+    // Worker, CLI and info modes: no tray, no single-instance lock.
+    int argc = 0;
+    wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    bool handled = false;
+    int other = RunOtherMode(argc, argv, handled);
+    LocalFree(argv);
+    if (handled) return other;
 
     wstring lockName = L"Roda.SingleInstance";
     if (TestMode()) lockName += L".Test." + std::to_wstring(std::hash<wstring>{}(DataDir()) % 1000000);
