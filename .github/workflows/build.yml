@@ -1,0 +1,82 @@
+# Builds Roda.exe (x64 and ARM64) on GitHub's own machines from the public source.
+# Every push to main is built as a check; pushing a tag like v0.1.0 also publishes a release
+# with both exes, their SHA-256 sums and build provenance attestations.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write       # create the release
+  id-token: write       # sign the attestation
+  attestations: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+
+      - name: Build
+        env:
+          ZIG: zig
+        run: ./build.sh out all
+
+      - name: Name and checksum
+        id: sum
+        run: |
+          mkdir -p dist
+          cp out/x64/Roda.exe dist/Roda-x64.exe
+          cp out/arm64/Roda.exe dist/Roda-arm64.exe
+          echo "x64=$(sha256sum dist/Roda-x64.exe | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "arm64=$(sha256sum dist/Roda-arm64.exe | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Roda
+          path: dist/*.exe
+
+      - name: Attest build provenance
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          X64: ${{ steps.sum.outputs.x64 }}
+          ARM: ${{ steps.sum.outputs.arm64 }}
+        run: |
+          cat > notes.md <<EOF
+          Download **Roda-x64.exe** (most PCs) or **Roda-arm64.exe** (Windows on ARM), then run it.
+          No installer and no runtime needed (Windows 10 / 11).
+
+          Built by GitHub Actions from commit ${GITHUB_SHA}. Verify with:
+          \`gh attestation verify Roda-x64.exe --repo ${GITHUB_REPOSITORY}\`
+
+          SHA-256:
+          - Roda-x64.exe: \`${X64}\`
+          - Roda-arm64.exe: \`${ARM}\`
+
+          Windows SmartScreen may warn that the app is unrecognised because the exe is not signed:
+          choose **More info → Run anyway**.
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.exe --clobber
+          else
+            gh release create "$TAG" dist/*.exe --title "Roda ${TAG#v}" --notes-file notes.md --generate-notes
+          fi
