@@ -6,9 +6,21 @@ namespace rd {
 
 namespace {
 
-constexpr double kProbeWindow = 0.4;    // how long the probe waits for a drag source to show itself
+constexpr double kProbeWindow = 0.4;    // how long after the drag threshold a drag source may take to show itself
 constexpr double kKeyPoll = 0.016;      // the keys are read this often during a file drag, never otherwise
 constexpr int kProbeSize = 48;          // pixels: big enough that a quick flick stays over it
+// DoDragDrop gives the mouse capture to this hidden OLE window for the whole drag. A text
+// selection, a window move or an app's own dragging keeps the capture on the app's window.
+constexpr wchar_t kOleDragClass[] = L"CLIPBRDWNDCLASS";
+constexpr int kMaxCaptureLogs = 4;      // per drag
+
+uint64_t ProcessCpu100ns()
+{
+    FILETIME c, e, k, u;
+    if (!GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u)) return 0;
+    auto v = [](FILETIME f) { return (uint64_t(f.dwHighDateTime) << 32) | f.dwLowDateTime; };
+    return v(k) + v(u);
+}
 
 }  // namespace
 
@@ -104,9 +116,27 @@ void Trigger::OnRawInput(HRAWINPUT h)
     bool swap = GetSystemMetrics(SM_SWAPBUTTON) != 0;
     USHORT downFlag = swap ? RI_MOUSE_RIGHT_BUTTON_DOWN : RI_MOUSE_LEFT_BUTTON_DOWN;
     USHORT upFlag = swap ? RI_MOUSE_RIGHT_BUTTON_UP : RI_MOUSE_LEFT_BUTTON_UP;
+    CountCpu();
     if (f & downFlag) ButtonDown(CursorPos());
-    if (state_ == State::Pressed || state_ == State::Probing || state_ == State::FileDrag) Moved(CursorPos());
+    if (state_ == State::Pressed || state_ == State::Watching || state_ == State::Probing || state_ == State::FileDrag) Moved(CursorPos());
     if (f & upFlag) ButtonUp();
+}
+
+void Trigger::CountCpu()
+{
+    // Raw input arrives for every mouse report (up to 1000 a second on gaming mice), so this
+    // is where Roda could cost CPU without anyone noticing. Logged once per minute of movement;
+    // only the clock is read per event.
+    rawEvents_++;
+    double now = Now();
+    if (cpuSince_ < 0) { cpuSince_ = now; cpuAtStart_ = ProcessCpu100ns(); rawEvents_ = 0; return; }
+    if (now - cpuSince_ < 60) return;
+    uint64_t cpu = ProcessCpu100ns();
+    Log(L"cpu: %.0f ms used in the last %.0f s while the mouse moved (%d mouse reports)",
+        (cpu - cpuAtStart_) / 10000.0, now - cpuSince_, rawEvents_);
+    cpuSince_ = now;
+    cpuAtStart_ = cpu;
+    rawEvents_ = 0;
 }
 
 void Trigger::ButtonDown(POINT p)
@@ -131,20 +161,30 @@ void Trigger::Moved(POINT p)
     switch (state_) {
         case State::Pressed:
             if (std::abs(p.x - down_.x) > GetSystemMetrics(SM_CXDRAG) || std::abs(p.y - down_.y) > GetSystemMetrics(SM_CYDRAG)) {
+                if (HWND fs = FullScreenAppAt(p)) {
+                    state_ = State::Ignored;
+                    Log(L"drag: a full screen app is in front (%s, %s); not watching this drag", ProcessNameOf(fs).c_str(), ClassOf(fs).c_str());
+                    break;
+                }
                 // A drag may have started. Keys already held now (Shift+drag to move) are not a trigger press.
                 int keys[3] = { settings_.keyConvert, settings_.keyTools, settings_.keyActions };
                 for (int i = 0; i < 3; i++) keyWasDown_[i] = (GetAsyncKeyState(keys[i]) & 0x8000) != 0;
-                state_ = State::Probing;
-                probeSince = Now();
-                nextTick_ = probeSince + kKeyPoll;
-                ShowProbe(p);
+                // The window the button went down on: its thread starts the drag, if anyone does.
+                srcThread_ = GetWindowThreadProcessId(WindowFromPoint(down_), nullptr);
+                lastCapture_ = reinterpret_cast<HWND>(-1);   // so "no capture" is logged too
+                captureLogs_ = 0;
+                state_ = State::Watching;
+                dragSince_ = Now();
+                nextTick_ = dragSince_ + kKeyPoll;
+                CheckCapture();
             }
             break;
+        case State::Watching:
+            CheckCapture();
+            break;
         case State::Probing:
-            if (Now() - probeSince > kProbeWindow) {
-                HideProbe();
-                state_ = State::Ignored;
-                Log(L"drag: no file drag (a selection, a window move, or an app's own dragging)");
+            if (Now() - dragSince_ > kProbeWindow) {
+                GiveUp(L"the drag source never offered anything to the probe");
             } else {
                 SetWindowPos(probe_, HWND_TOPMOST, p.x - kProbeSize / 2, p.y - kProbeSize / 2, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
             }
@@ -154,6 +194,41 @@ void Trigger::Moved(POINT p)
             break;
         default: break;
     }
+}
+
+void Trigger::CheckCapture()
+{
+    if (Now() - dragSince_ > kProbeWindow) {
+        GiveUp(L"the mouse capture never moved to an OLE drag (a selection, a window move, or an app's own dragging)");
+        return;
+    }
+    // The drag source may not have started DoDragDrop yet when the threshold is crossed (it sees
+    // the same move a moment after Roda does), so this is asked again on each move and tick.
+    GUITHREADINFO gti{ sizeof gti };
+    HWND cap = GetGUIThreadInfo(srcThread_, &gti) ? gti.hwndCapture : nullptr;
+    if (!cap) {
+        // Desktop icons and some sources run the drag on another thread than the window under
+        // the pointer, so also ask about the thread in front.
+        GUITHREADINFO fg{ sizeof fg };
+        if (GetGUIThreadInfo(0, &fg)) cap = fg.hwndCapture;
+    }
+    wstring cls = ClassOf(cap);
+    if (cap != lastCapture_ && captureLogs_ < kMaxCaptureLogs) {
+        lastCapture_ = cap;
+        captureLogs_++;
+        if (cap) Log(L"drag: mouse capture is on %s (%s)%s", cls.c_str(), ProcessNameOf(cap).c_str(), (gti.flags & GUI_INMOVESIZE) ? L", moving or sizing a window" : L"");
+        else Log(L"drag: no window has the mouse capture yet");
+    }
+    if (cls != kOleDragClass) return;
+    state_ = State::Probing;
+    ShowProbe(CursorPos());
+}
+
+void Trigger::GiveUp(const wchar_t* why)
+{
+    HideProbe();
+    state_ = State::Ignored;
+    Log(L"drag: not a file drag: %s", why);
 }
 
 void Trigger::ShowProbe(POINT p)
@@ -172,7 +247,7 @@ void Trigger::OnProbeEnter(IDataObject* data)
     // Step aside first, so the drag carries on to wherever the user is heading.
     HideProbe();
     if (state_ != State::Probing) return;
-    double ms = (Now() - probeSince) * 1000;
+    double ms = (Now() - dragSince_) * 1000;
     if (!ReadDroppedPaths(data, paths_)) {
         state_ = State::Ignored;
         Log(L"drag: a drag without files (text or a link), %.0f ms after it started", ms);
@@ -183,7 +258,7 @@ void Trigger::OnProbeEnter(IDataObject* data)
     CheckKeys();
 }
 
-bool Trigger::NeedsTick() const { return state_ == State::Probing || state_ == State::FileDrag; }
+bool Trigger::NeedsTick() const { return state_ == State::Watching || state_ == State::Probing || state_ == State::FileDrag; }
 
 double Trigger::NextTickIn() const { return std::max(0.0, nextTick_ - Now()); }
 
@@ -194,10 +269,9 @@ void Trigger::Tick()
     nextTick_ = now + kKeyPoll;
     // A button-up we never heard about (it happened over an elevated window, say).
     if (!PrimaryDown()) { ButtonUp(); return; }
-    if (state_ == State::Probing && now - probeSince > kProbeWindow) {
-        HideProbe();
-        state_ = State::Ignored;
-        Log(L"drag: no file drag (a selection, a window move, or an app's own dragging)");
+    if (state_ == State::Watching) { CheckCapture(); return; }
+    if (state_ == State::Probing && now - dragSince_ > kProbeWindow) {
+        GiveUp(L"the drag source never offered anything to the probe");
         return;
     }
     if (state_ == State::FileDrag) CheckKeys();

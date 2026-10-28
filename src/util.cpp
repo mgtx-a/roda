@@ -300,6 +300,63 @@ Mon MonitorOf(POINT p)
     return m;
 }
 
+wstring ProcessNameOf(HWND w)
+{
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return L"?";
+    wchar_t path[MAX_PATH] = L"";
+    DWORD n = MAX_PATH;
+    if (!QueryFullProcessImageNameW(p, 0, path, &n)) path[0] = 0;
+    CloseHandle(p);
+    wstring name = FileName(path);
+    for (auto& c : name) c = wchar_t(towlower(c));
+    return name;
+}
+
+wstring ClassOf(HWND w)
+{
+    wchar_t cls[96] = L"";
+    if (w) GetClassNameW(w, cls, 96);
+    return cls;
+}
+
+/// Screenshot overlays cover the whole screen while you snip, and on Windows 10 the
+/// snipping overlay is often only cloaked afterwards. None of that is a full screen app.
+/// (From Ampaian's full screen watcher.)
+static bool IsCaptureOverlay(HWND w)
+{
+    BOOL cloaked = FALSE;
+    if (!IsWindowVisible(w) || IsIconic(w)) return true;
+    if (SUCCEEDED(DwmGetWindowAttribute(w, DWMWA_CLOAKED, &cloaked, sizeof cloaked)) && cloaked) return true;
+    static const wchar_t* overlays[] = { L"screenclippinghost.exe", L"snippingtool.exe", L"screensketch.exe", L"shellexperiencehost.exe" };
+    wstring name = ProcessNameOf(w);
+    for (auto* o : overlays) if (name == o) return true;
+    return false;
+}
+
+HWND FullScreenAppAt(POINT p)
+{
+    // Ampaian polls this four times a second on a thread; Roda only needs it when a drag
+    // starts, so it is asked then and costs nothing while idle.
+    int st = 0;
+    bool busy = SHQueryUserNotificationState(reinterpret_cast<QUERY_USER_NOTIFICATION_STATE*>(&st)) == S_OK && (st == 2 || st == 3 || st == 4);   // busy, D3D full screen, presentation
+    if (!busy) return nullptr;
+    HWND fg = GetForegroundWindow();
+    wstring cls = ClassOf(fg);
+    if (!fg || cls == L"Progman" || cls == L"WorkerW" || cls == L"Shell_TrayWnd" || IsCaptureOverlay(fg)) return nullptr;
+    HMONITOR mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
+    if (mon != MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST)) return nullptr;
+    // The app in front must really cover the whole screen: Windows reports "busy" in other situations too.
+    MONITORINFO mi{ sizeof mi };
+    RECT wr{};
+    if (!GetMonitorInfoW(mon, &mi) || !GetWindowRect(fg, &wr)) return nullptr;
+    const RECT& b = mi.rcMonitor;
+    bool covers = wr.left <= b.left + 1 && wr.top <= b.top + 1 && wr.right >= b.right - 1 && wr.bottom >= b.bottom - 1;
+    return covers ? fg : nullptr;
+}
+
 // ---------------------------------------------------------------- log
 
 void Log(const wchar_t* fmt, ...)

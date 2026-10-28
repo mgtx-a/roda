@@ -104,6 +104,9 @@ std::vector<Mon> Monitors();
 POINT CursorPos();
 const Mon* MonitorAt(const std::vector<Mon>& all, POINT p);
 Mon MonitorOf(POINT p);
+wstring ProcessNameOf(HWND w);                  // "explorer.exe", lower case; "?" if it can't be read
+wstring ClassOf(HWND w);                        // window class name
+HWND FullScreenAppAt(POINT p);                  // the full screen app in front on p's monitor, if any
 
 // ---- settings.json
 struct Settings {

@@ -2,8 +2,19 @@
 // key input, over a window of its own, so the trigger can be checked without a person.
 //
 //   dragtest.exe <scenario> <file> [<file2> <folder>]
-//   scenarios: file-shift  file-nokey  text-shift  select-shift  mixed-ctrl  file-esc  switch
+//   scenarios: file-shift  file-nokey  text-shift  select-shift  mixed-ctrl  file-esc  switch  file-fullscreen
 //
+// Or with a real app as the drag source (found with UI Automation):
+//   dragtest.exe ext <source> <item|-> <shift|ctrl|alt|none> [selectall|textdrag|select|titlebar]
+//   source: explorer:<folder> (opened, then closed)  desktop  title:<part of a window title>
+//   item:   name of the list item to press on (Explorer, desktop, a downloads page), or -
+//   selectall  Ctrl+A in the source first (many files)
+//   textdrag   Ctrl+A, then press on the highlighted text and drag it (an OLE text drag)
+//   select     press inside the text area and drag to select, key pressed mid-way
+//   titlebar   press on the title bar and move the window, key pressed mid-way
+//
+// The key is pressed only once the pointer is over the helper's window, so if the wheel fails
+// to open the drop lands there (and is reported), never on a folder in the source.
 // Prints what the helper's own window received; Roda's log says what Roda did.
 #ifndef UNICODE
 #define UNICODE
@@ -13,6 +24,7 @@
 #include <ole2.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <uiautomation.h>
 
 #include <cstdio>
 #include <string>
@@ -103,6 +115,259 @@ static LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l)
     return DefWindowProcW(h, m, w, l);
 }
 
+// ---------------------------------------------------------------- real apps as the drag source
+
+static const CLSID kCUIAutomation = { 0xff48dba4, 0x60ef, 0x4201, { 0xaa, 0x87, 0x54, 0x10, 0x3e, 0xef, 0x59, 0x4e } };
+
+static HWND g_src;
+static std::wstring g_part;
+
+static BOOL CALLBACK FindTitle(HWND h, LPARAM)
+{
+    wchar_t t[512];
+    if (!IsWindowVisible(h) || !GetWindowTextW(h, t, 512)) return TRUE;
+    if (wcsstr(t, g_part.c_str()) && h != g_win) { g_src = h; return FALSE; }
+    return TRUE;
+}
+
+static HWND WindowTitled(const std::wstring& part, int waitMs)
+{
+    g_part = part;
+    for (int t = 0; t < waitMs; t += 100) {
+        g_src = nullptr;
+        EnumWindows(FindTitle, 0);
+        if (g_src) return g_src;
+        Sleep(100);
+    }
+    return nullptr;
+}
+
+static BOOL CALLBACK FindDefView(HWND h, LPARAM lp)
+{
+    HWND v = FindWindowExW(h, nullptr, L"SHELLDLL_DefView", nullptr);
+    if (v) { *reinterpret_cast<HWND*>(lp) = FindWindowExW(v, nullptr, L"SysListView32", nullptr); return FALSE; }
+    return TRUE;
+}
+
+static HWND DesktopList()
+{
+    HWND list = nullptr;
+    EnumWindows(FindDefView, reinterpret_cast<LPARAM>(&list));   // under Progman, or a WorkerW after a wallpaper change
+    return list;
+}
+
+static std::wstring StripExt(const std::wstring& n)
+{
+    size_t dot = n.find_last_of(L'.');
+    return dot == std::wstring::npos ? n : n.substr(0, dot);
+}
+
+/// Screen rectangle of the element named `name` (or the name without its extension, as Explorer
+/// shows it when extensions are hidden) inside `root`. Browsers build their tree on demand, so retry.
+static bool FindItem(HWND root, const std::wstring& name, RECT& out)
+{
+    IUIAutomation* ua = nullptr;
+    if (FAILED(CoCreateInstance(kCUIAutomation, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&ua)))) return false;
+    bool found = false;
+    for (int tries = 0; tries < 40 && !found; tries++) {
+        IUIAutomationElement* top = nullptr;
+        if (SUCCEEDED(ua->ElementFromHandle(root, &top)) && top) {
+            for (const std::wstring& n : { name, StripExt(name) }) {
+                VARIANT v;
+                v.vt = VT_BSTR;
+                v.bstrVal = SysAllocString(n.c_str());
+                IUIAutomationCondition* c = nullptr;
+                ua->CreatePropertyCondition(UIA_NamePropertyId, v, &c);
+                IUIAutomationElement* e = nullptr;
+                top->FindFirst(TreeScope_Descendants, c, &e);
+                if (e) {
+                    RECT r{};
+                    if (SUCCEEDED(e->get_CurrentBoundingRectangle(&r)) && r.right > r.left) { out = r; found = true; }
+                    e->Release();
+                }
+                c->Release();
+                VariantClear(&v);
+                if (found) break;
+            }
+            top->Release();
+        }
+        if (!found) Sleep(250);
+    }
+    ua->Release();
+    return found;
+}
+
+static BOOL CALLBACK Biggest(HWND h, LPARAM lp)
+{
+    auto* best = reinterpret_cast<std::pair<HWND, long>*>(lp);
+    RECT r;
+    if (IsWindowVisible(h) && GetWindowRect(h, &r)) {
+        long a = (r.right - r.left) * (r.bottom - r.top);
+        if (a > best->second) *best = { h, a };
+    }
+    return TRUE;
+}
+
+/// The text area: the biggest visible child window (Edit, RICHEDIT50W, _WwG, a browser's page).
+static RECT TextArea(HWND top)
+{
+    std::pair<HWND, long> best{ nullptr, 0 };
+    EnumChildWindows(top, Biggest, reinterpret_cast<LPARAM>(&best));
+    RECT r{};
+    GetWindowRect(best.first ? best.first : top, &r);
+    return r;
+}
+
+/// A point on highlighted (selected) text: blue-ish pixels with blue all around them.
+static bool FindHighlight(RECT area, POINT& out)
+{
+    int w = area.right - area.left, h = area.bottom - area.top;
+    HDC screen = GetDC(nullptr);
+    HDC mem = CreateCompatibleDC(screen);
+    BITMAPINFO bi{};
+    bi.bmiHeader = { sizeof(BITMAPINFOHEADER), w, -h, 1, 32, BI_RGB };
+    void* bits = nullptr;
+    HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    SelectObject(mem, bmp);
+    BitBlt(mem, 0, 0, w, h, screen, area.left, area.top, SRCCOPY);
+    auto px = static_cast<const uint8_t*>(bits);
+    auto blue = [&](int x, int y) {
+        if (x < 0 || y < 0 || x >= w || y >= h) return false;
+        const uint8_t* p = px + (size_t(y) * w + x) * 4;   // B G R
+        return p[0] > 170 && p[0] > p[2] + 50 && p[1] > p[2];   // dark (0,120,215) or light (153,201,239) selection blue
+    };
+    bool found = false;
+    for (int y = 0; y < h && !found; y += 2)
+        for (int x = 0; x < w && !found; x += 2)
+            if (blue(x, y) && blue(x + 8, y) && blue(x, y + 8) && blue(x + 8, y + 8)) { out = { area.left + x + 4, area.top + y + 4 }; found = true; }
+    DeleteObject(bmp);
+    DeleteDC(mem);
+    ReleaseDC(nullptr, screen);
+    return found;
+}
+
+static void ClickAt(int x, int y)
+{
+    MoveAbs(x, y); Sleep(60);
+    Button(true); Sleep(40); Button(false); Sleep(250);
+}
+
+static void Chord(WORD mod, WORD vk)
+{
+    Key(mod, true); Key(vk, true); Key(vk, false); Key(mod, false);
+}
+
+static WORD KeyNamed(const std::wstring& k)
+{
+    if (k == L"shift") return VK_SHIFT;
+    if (k == L"ctrl") return VK_CONTROL;
+    if (k == L"alt") return VK_MENU;
+    return 0;
+}
+
+static int RunExternal(const std::wstring& source, const std::wstring& item, const std::wstring& keyName, const std::wstring& opt)
+{
+    HWND src = nullptr, area = nullptr;
+    bool desktop = source == L"desktop", opened = false;
+    if (desktop) {
+        Chord(VK_LWIN, 'D');   // show the desktop
+        Sleep(800);
+        src = area = DesktopList();
+    } else if (source.rfind(L"explorer:", 0) == 0) {
+        std::wstring folder = source.substr(9);
+        ShellExecuteW(nullptr, L"open", L"explorer.exe", (L"\"" + folder + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
+        src = WindowTitled(folder.substr(folder.find_last_of(L'\\') + 1), 6000);
+        opened = true;
+    } else if (source.rfind(L"title:", 0) == 0) {
+        src = WindowTitled(source.substr(6), 6000);
+    }
+    if (!src) { wprintf(L"scenario=ext source=%ls result=source-window-not-found\n", source.c_str()); return 1; }
+    if (!desktop) {
+        ShowWindow(src, SW_RESTORE);
+        SetWindowPos(src, HWND_TOP, 20, 20, 900, H - 140, SWP_SHOWWINDOW);
+        Sleep(700);
+        RECT wr;
+        GetWindowRect(src, &wr);
+        ClickAt((wr.left + wr.right) / 2, wr.top + 12);      // the title bar: brings the window to the front
+        area = src;
+    }
+
+    // The helper's window, to the right of the source and never activated: the source keeps the focus.
+    int hx = 1000, hy = 120, hw = std::max(300, W - 1040), hh = H - 300;
+    g_win = CreateWindowExW(WS_EX_TOPMOST | WS_EX_NOACTIVATE, L"RodaDragTest", L"Roda drag test", WS_POPUP, hx, hy, hw, hh, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    Tgt tgt;
+    RegisterDragDrop(g_win, &tgt);
+    ShowWindow(g_win, SW_SHOWNOACTIVATE);
+    MSG msg;
+    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) DispatchMessageW(&msg);
+
+    if (opt == L"selectall" || opt == L"textdrag") {
+        Chord(VK_CONTROL, 'A');
+        Sleep(400);
+    }
+
+    POINT at{};
+    RECT r{};
+    if (opt == L"titlebar") {
+        GetWindowRect(src, &r);
+        at = { (r.left + r.right) / 2 + 60, r.top + 12 };
+    } else if (opt == L"textdrag") {
+        if (!FindHighlight(TextArea(src), at)) { wprintf(L"scenario=ext source=%ls result=no-highlighted-text\n", source.c_str()); return 1; }
+    } else if (opt == L"select") {
+        r = TextArea(src);
+        at = { r.left + 30, r.top + std::max(30L, (r.bottom - r.top) * 15 / 100) };   // below a browser's tab strip
+    } else {
+        if (!FindItem(area, item, r)) { wprintf(L"scenario=ext source=%ls item=%ls result=item-not-found\n", source.c_str(), item.c_str()); return 1; }
+        // DRAGTEST_AT=dx,dy: press there inside the item instead (a browser's download card).
+        // A row (details view): press on the icon and name, not the empty columns.
+        if (const wchar_t* off = _wgetenv(L"DRAGTEST_AT")) at = { r.left + _wtoi(off), r.top + _wtoi(wcschr(off, L',') + 1) };
+        else at = (r.right - r.left) > 2 * (r.bottom - r.top) ? POINT{ r.left + 30, (r.top + r.bottom) / 2 } : POINT{ (r.left + r.right) / 2, (r.top + r.bottom) / 2 - 8 };
+    }
+
+    WORD key = KeyNamed(keyName);
+    int tx = hx + hw / 2, ty = hy + hh / 2 + 100;   // where the key is pressed: over the helper's window
+    bool inPlace = opt == L"select" || opt == L"titlebar";
+    std::thread input([&] {
+        MoveAbs(at.x, at.y);
+        Sleep(120);
+        Button(true);
+        Sleep(80);
+        Glide(at.x, at.y, at.x + 12, at.y + 4, 3, 12);   // past the drag threshold
+        Sleep(60);
+        if (inPlace) {
+            // A selection or a window move: the key goes down part-way, as a person might do.
+            Glide(at.x + 12, at.y + 4, at.x + 200, at.y + 60, 10, 15);
+            if (key) Key(key, true);
+            Sleep(80);
+            Glide(at.x + 200, at.y + 60, at.x + 320, at.y + 90, 10, 15);
+            Sleep(150);
+        } else {
+            Glide(at.x + 12, at.y + 4, tx, ty, 25, 15);
+            Sleep(150);
+            if (key) {
+                Key(key, true);
+                Sleep(60);
+                Glide(tx, ty, tx, ty - 3, 2, 15);
+                Sleep(80);
+                Glide(tx, ty - 3, tx, ty - 100, 12, 15);   // up onto the top segment
+                Sleep(150);
+            }
+        }
+        if (key) Key(key, false);
+        Sleep(120);
+        Button(false);
+        Sleep(600);
+        PostMessageW(g_win, WM_CLOSE, 0, 0);
+    });
+    while (IsWindow(g_win) && GetMessageW(&msg, nullptr, 0, 0) > 0) DispatchMessageW(&msg);
+    input.join();
+    wprintf(L"scenario=ext source=%ls item=%ls key=%ls opt=%ls pressed-at=%ld,%ld helper-window-got-drop=%ls\n", source.c_str(), item.c_str(), keyName.c_str(),
+            opt.empty() ? L"-" : opt.c_str(), at.x, at.y, g_gotDrop ? L"yes" : L"no");
+    if (opened) PostMessageW(src, WM_CLOSE, 0, 0);
+    if (desktop) Chord(VK_LWIN, 'D');   // and back
+    return 0;
+}
+
 static IDataObject* FilesObject(const std::vector<std::wstring>& paths)
 {
     std::vector<PIDLIST_ABSOLUTE> abs;
@@ -151,8 +416,15 @@ int wmain(int argc, wchar_t** argv)
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.lpszClassName = L"RodaDragTest";
     RegisterClassW(&wc);
+    if (sc == L"ext") {
+        if (argc < 5) { wprintf(L"usage: dragtest ext <source> <item|-> <key> [opt]\n"); return 2; }
+        int rc = RunExternal(argv[2], argv[3], argv[4], argc > 5 ? argv[5] : L"");
+        OleUninitialize();
+        return rc;
+    }
     int ww = std::min(1000, W - 100), wh = std::min(760, H - 100);
     int wx = (W - ww) / 2, wy = (H - wh) / 2;
+    if (sc == L"file-fullscreen") { ww = W; wh = H; wx = wy = 0; }   // a full screen app in front: Roda must stay out
     g_win = CreateWindowExW(WS_EX_TOPMOST, wc.lpszClassName, L"Roda drag test", WS_POPUP | WS_VISIBLE, wx, wy, ww, wh, nullptr, nullptr, wc.hInstance, nullptr);
     Tgt tgt;
     RegisterDragDrop(g_win, &tgt);
