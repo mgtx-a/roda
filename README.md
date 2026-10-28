@@ -54,6 +54,9 @@ Actions wheel.
   TSV each sheet becomes its own file in a folder when there are several. CSVs with semicolons (as Excel
   writes them in many countries) are recognised. CSV comes out as UTF-8 with the mark Excel needs.
 - **Subtitles**: SRT ↔ VTT, both → TXT (just the words).
+- **Office files to PDF**, when Microsoft Office is installed: Word (DOCX, DOC, RTF), Excel (XLSX, XLS,
+  ODS) and PowerPoint (PPTX, PPT) make the PDF themselves, so it looks exactly as in Office. Office runs
+  hidden and opens the file read-only; the option doesn't appear on PCs without that Office app.
 - **Actions** (anything): Copy to…, Move to… (with Explorer's own progress, conflict questions and
   undo), the last three "Copy to" folders, Copy path, Terminal, Float (a picture or a PDF's first page
   that stays on top: drag to move, mouse wheel or corners to resize, double-click to open, Esc to
@@ -76,7 +79,7 @@ Known limits: a drag from an app running as administrator can't open the wheel (
 normal app receive drops from an elevated one); don't run Roda as administrator to get around it.
 A PDF made of scanned pages has no text to extract (no OCR); password-protected PDFs are refused with a
 plain message. Not yet: RAR extraction, AVIF/HEIC output, Share, PDF to XLSX, PDF compression, DOCX →
-PDF (comes with Office support), audio and video (Phase 4).
+PDF without Office installed, audio and video (Phase 4).
 
 ## Privacy & permissions
 Roda makes **no network connections**: no telemetry, no update checks, nothing is uploaded.
@@ -93,6 +96,10 @@ What it touches:
   below-normal priority), so a damaged file can only stop its own worker. Results are written next to
   the original, or in `outputFolder` if you set one. Copy to / Move to use Explorer's own file engine.
   PDFs are read by `engines\pdfium.dll`, which only workers load, by its full path, when a PDF is opened.
+- **Microsoft Office** (only for "to PDF" of Office files, only if installed): the worker starts Word,
+  Excel or PowerPoint invisibly, opens the file read-only, saves the PDF and closes it. It quits Office
+  afterwards unless other files are open in it; cancelling the job ends an Office it started. Whether
+  Office is installed is read from the registry (nothing is written).
 - **Clipboard:** written only by *Copy path*.
 - **Programs started:** Windows Terminal (or Command Prompt) for *Terminal*; the default app for a result
   when you click *Open*; Explorer for *Show in folder*.

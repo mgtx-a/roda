@@ -8,6 +8,7 @@ namespace rd {
 bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& r);
 bool RunSheetTo(const Job& job, Kind kind, const wstring& target, const Progress& p, Result& r);
 bool RunSubtitleTo(const Job& job, Kind kind, const wstring& target, const Progress& p, Result& r);
+bool RunOfficePdf(const Job& job, Kind kind, const Progress& p, Result& r);
 
 namespace {
 
@@ -74,6 +75,7 @@ bool RunConvert(const Job& job, const Progress& p, Result& r)
     wstring target = job.op.substr(job.op.find(L'.') + 1);   // "to.png" -> "png"
     Kind kind = KindOfPath(job.inputs[0]);
     if (IsImage(kind)) return RunToImage(job, p, r);
+    if (target == L"pdf" && (Bit(kind) & (kWordFiles | kExcelFiles | kPowerPointFiles))) return RunOfficePdf(job, kind, p, r);
     if (kind == Kind::Pdf) return RunPdfTo(job, target, p, r);
     if (Bit(kind) & kDocs) return RunDocTo(job, kind, target, p, r);
     if (Bit(kind) & kSheets) return RunSheetTo(job, kind, target, p, r);

@@ -11,7 +11,7 @@ const wchar_t* WheelName(WheelKind k);
 
 enum class Kind : uint8_t {
     Unknown, Folder, Jpeg, Png, Webp, Gif, Bmp, Tiff, Ico, Svg, Heic, Avif, Zip, Tar, Gzip, Rar, Pdf,
-    Docx, Markdown, Html, Rtf, Txt, Xlsx, Ods, Csv, Tsv, Xls, Srt, Vtt, Count
+    Docx, Markdown, Html, Rtf, Txt, Xlsx, Ods, Csv, Tsv, Xls, Srt, Vtt, Doc, Pptx, Ppt, Count
 };
 using KindSet = uint64_t;
 constexpr KindSet Bit(Kind k) { return KindSet(1) << unsigned(k); }
@@ -21,6 +21,10 @@ constexpr KindSet kAnything = ~KindSet(0);
 constexpr KindSet kDocs = Bit(Kind::Docx) | Bit(Kind::Markdown) | Bit(Kind::Html) | Bit(Kind::Rtf) | Bit(Kind::Txt);
 constexpr KindSet kSheets = Bit(Kind::Xlsx) | Bit(Kind::Ods) | Bit(Kind::Csv) | Bit(Kind::Tsv) | Bit(Kind::Xls);
 constexpr KindSet kSubtitles = Bit(Kind::Srt) | Bit(Kind::Vtt);
+// What each Office app turns into a PDF (7.6): only offered when that app is installed.
+constexpr KindSet kWordFiles = Bit(Kind::Docx) | Bit(Kind::Doc) | Bit(Kind::Rtf);
+constexpr KindSet kExcelFiles = Bit(Kind::Xlsx) | Bit(Kind::Xls) | Bit(Kind::Ods);
+constexpr KindSet kPowerPointFiles = Bit(Kind::Pptx) | Bit(Kind::Ppt);
 
 Kind KindFromExtension(const wstring& path);
 /// From the first bytes of a file; falls back to the extension when they say nothing.
@@ -34,7 +38,7 @@ inline bool IsImage(Kind k) { return (Bit(k) & kImages) != 0; }
 enum class Icon : uint8_t { None, Compress, Resize, Crop, Rotate, Flip, Strip, Merge, Extract, Copy, Move, Folder, Path, Terminal, Float, Share, Archive, Split, Images };
 
 /// Optional engines: DLLs in the "engines" folder next to Roda.exe (the Full build).
-enum class Engine : uint8_t { None, Pdfium };
+enum class Engine : uint8_t { None, Pdfium, Word, Excel, PowerPoint };   // Office apps: when installed
 bool EngineAvailable(Engine e);   // the DLL is there (checked once)
 wstring EnginePath(Engine e);
 enum class Popup : uint8_t { None, Quality, Size, Crop };
@@ -57,6 +61,7 @@ struct Job {
 struct Progress {
     std::function<void(double)> report;          // 0..1
     std::function<void(const wstring&)> part;    // the partial output, so a cancel can delete it
+    std::function<void(DWORD)> helper;           // a process started for this job (Office), ended with it on cancel
     void Set(double f) const { if (report) report(f); }
 };
 

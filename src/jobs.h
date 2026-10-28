@@ -15,6 +15,7 @@ struct JobState {
     uint64_t before = 0, after = 0;
     Json info;                // extra results (e.g. the picture size, for previews)
     bool quiet = false;       // no card: a preview for Float or a popup
+    DWORD helper = 0;         // Office started by this job's worker: ended too when the job is cancelled
 };
 
 class Jobs {

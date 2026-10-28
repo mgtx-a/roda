@@ -177,6 +177,7 @@ int Worker()
         PrintLine(Json::Object().Set(L"progress", f));
     };
     p.part = [](const wstring& path) { PrintLine(Json::Object().Set(L"part", path)); };
+    p.helper = [](DWORD pid) { PrintLine(Json::Object().Set(L"helper", double(pid))); };
     Result r;
     if (!Run(job, p, r)) { PrintLine(Json::Object().Set(L"error", r.error)); return 1; }
     PrintLine(Json::Object().Set(L"done", r.out).Set(L"before", double(r.before)).Set(L"after", double(r.after)).Set(L"info", r.info));

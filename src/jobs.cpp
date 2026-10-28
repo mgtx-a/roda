@@ -138,6 +138,7 @@ void Jobs::OnLine(int id, const std::string& line)
         if (s.id != id) continue;
         if (j.has(L"progress")) s.progress = j[L"progress"].Num();
         if (j.has(L"part")) s.part = j[L"part"].Str();
+        if (j.has(L"helper")) s.helper = DWORD(j[L"helper"].Num());
         if (j.has(L"error")) s.error = j[L"error"].Str();
         if (j.has(L"done")) {
             s.out = j[L"done"].Str();
@@ -198,6 +199,10 @@ void Jobs::Cancel(int id)
         if (r->id == id && !r->cancelled) {
             r->cancelled = true;
             TerminateProcess(r->process, 1);   // the reader thread sees the end and reports it
+            // The hidden Office it started would otherwise stay behind with the file open.
+            for (auto& s : states_)
+                if (s.id == id && s.helper)
+                    if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, s.helper)) { TerminateProcess(h, 1); CloseHandle(h); }
         }
     }
 }

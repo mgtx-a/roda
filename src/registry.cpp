@@ -45,6 +45,9 @@ Kind KindFromExtension(const wstring& path)
     if (e == L".csv") return Kind::Csv;
     if (e == L".tsv" || e == L".tab") return Kind::Tsv;
     if (e == L".xls") return Kind::Xls;
+    if (e == L".doc") return Kind::Doc;
+    if (e == L".pptx") return Kind::Pptx;
+    if (e == L".ppt") return Kind::Ppt;
     if (e == L".srt") return Kind::Srt;
     if (e == L".vtt") return Kind::Vtt;
     return Kind::Unknown;
@@ -70,9 +73,12 @@ Kind KindFromBytes(const uint8_t* p, size_t n, const wstring& path)
     if (at(0, "PK\x03\x04") || at(0, "PK\x05\x06")) {
         // .docx, .xlsx and .ods are zips too: the name says which.
         Kind e = KindFromExtension(path);
-        return e == Kind::Docx || e == Kind::Xlsx || e == Kind::Ods ? e : Kind::Zip;
+        return e == Kind::Docx || e == Kind::Xlsx || e == Kind::Ods || e == Kind::Pptx ? e : Kind::Zip;
     }
-    if (at(0, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")) return KindFromExtension(path) == Kind::Xls ? Kind::Xls : Kind::Unknown;   // old Office files
+    if (at(0, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")) {   // old Office files: the name says which
+        Kind e = KindFromExtension(path);
+        return e == Kind::Xls || e == Kind::Doc || e == Kind::Ppt ? e : Kind::Unknown;
+    }
     if (at(0, "{\\rtf")) return Kind::Rtf;
     if (at(0, "WEBVTT") || at(3, "WEBVTT")) return Kind::Vtt;
     if (at(0, "\x1f\x8b")) return Kind::Gzip;
@@ -106,7 +112,7 @@ const wchar_t* KindLabel(Kind k)
 {
     static const wchar_t* names[] = { L"", L"folder", L"JPG", L"PNG", L"WEBP", L"GIF", L"BMP", L"TIFF", L"ICO", L"SVG",
                                       L"HEIC", L"AVIF", L"ZIP", L"TAR", L"GZIP", L"RAR", L"PDF", L"DOCX", L"Markdown", L"HTML",
-                                      L"RTF", L"TXT", L"XLSX", L"ODS", L"CSV", L"TSV", L"XLS", L"SRT", L"VTT" };
+                                      L"RTF", L"TXT", L"XLSX", L"ODS", L"CSV", L"TSV", L"XLS", L"SRT", L"VTT", L"DOC", L"PPTX", L"PPT" };
     return unsigned(k) < sizeof names / sizeof names[0] ? names[unsigned(k)] : L"";
 }
 
@@ -213,9 +219,19 @@ wstring EnginePath(Engine e)
 bool EngineAvailable(Engine e)
 {
     if (e == Engine::None) return true;
-    static int pdfium = -1;   // looked for once: the folder doesn't change while Roda runs
-    if (pdfium < 0) pdfium = GetFileAttributesW(EnginePath(Engine::Pdfium).c_str()) != INVALID_FILE_ATTRIBUTES;
-    return pdfium == 1;
+    // Looked for once: installing Office or adding the DLL while Roda runs is rare (a restart picks it up).
+    static int found[5] = { 1, -1, -1, -1, -1 };
+    int& f = found[int(e)];
+    if (f < 0) {
+        if (e == Engine::Pdfium) f = GetFileAttributesW(EnginePath(Engine::Pdfium).c_str()) != INVALID_FILE_ATTRIBUTES;
+        else {
+            // An Office app is installed when its automation name is registered (only read, never written).
+            const wchar_t* prog = e == Engine::Word ? L"Word.Application" : e == Engine::Excel ? L"Excel.Application" : L"PowerPoint.Application";
+            CLSID clsid;
+            f = SUCCEEDED(CLSIDFromProgID(prog, &clsid));
+        }
+    }
+    return f == 1;
 }
 
 const Converter* FindConverter(const wstring& id)
@@ -237,6 +253,12 @@ std::vector<WheelOption> OptionsFor(WheelKind wheel, const std::vector<Kind>& ki
     KindSet readable = EngineAvailable(Engine::Pdfium) ? kAnything : ~Bit(Kind::Pdf);
     for (auto& c : Converters()) {
         KindSet inputs = c.inputs == kAnything ? kAnything : (c.inputs & readable);
+        if (wcscmp(c.id, L"to.pdf") == 0) {
+            // Office documents become PDFs through Office itself, when it is there.
+            if (EngineAvailable(Engine::Word)) inputs |= kWordFiles;
+            if (EngineAvailable(Engine::Excel)) inputs |= kExcelFiles;
+            if (EngineAvailable(Engine::PowerPoint)) inputs |= kPowerPointFiles;
+        }
         if (c.wheel != wheel || (all & ~inputs) != 0 || n < c.minItems || (c.maxItems && n > c.maxItems)) continue;
         if (c.needs != Engine::None && !EngineAvailable(c.needs)) continue;
         // No "PNG" on a wheel of PNGs: converting a file to its own format does nothing useful.

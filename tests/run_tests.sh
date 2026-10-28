@@ -141,6 +141,18 @@ else
   echo "(no engines/pdfium.dll next to the exe: PDF tests skipped)"
 fi
 
+# ---------------------------------------------------------------- Office documents to PDF (only where Office is installed)
+O="$WORK/office"; mkdir -p "$O"
+for pair in "Word.Application sample.docx" "Word.Application sample.rtf" "Excel.Application sample.xlsx" "Excel.Application sample.xls"; do
+  set -- $pair
+  if MSYS_NO_PATHCONV=1 reg query "HKCR\\$1" >/dev/null 2>&1; then   # only reads the registry
+    roda --convert "$(win "$CORPUS/$2")" "$(win "$O/$2.pdf")" --op to.pdf
+    info "$O/$2.pdf"; [ $RC -eq 0 ] && [ "$(field pages)" -ge 1 ] 2>/dev/null && ok || bad "$2 to PDF through Office: $OUT $INFO"
+  else
+    echo "($1 not installed: $2 to PDF skipped)"
+  fi
+done
+
 # ---------------------------------------------------------------- documents
 D="$WORK/doc"; mkdir -p "$D"
 for pair in "sample.docx html" "sample.docx md" "sample.docx txt" "sample.docx epub" "sample.md html" "sample.md docx" "sample.md txt" "sample.md epub" \
