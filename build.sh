@@ -14,7 +14,7 @@ TP=third_party
 WEBP=$TP/libwebp-1.5.0
 LUNA=$TP/lunasvg-3.2.1
 MINIZ=$TP/miniz-3.0.2
-INCLUDES="-Isrc -I$WEBP -I$WEBP/src -I$LUNA/include -I$LUNA/plutovg/include -I$MINIZ"
+INCLUDES="-I$WEBP -I$WEBP/src -I$LUNA/include -I$LUNA/plutovg/include -I$MINIZ"
 DEFS="-DLUNASVG_BUILD_STATIC -DPLUTOVG_BUILD_STATIC"
 
 tp_sources() {

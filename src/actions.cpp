@@ -137,33 +137,6 @@ void OpenTerminal(const std::vector<wstring>& paths, Cards& cards)
     else cards.Note(L"Terminal", L"Could not open a terminal in " + dir, true);
 }
 
-void Share(const std::vector<wstring>& paths, Cards& cards)
-{
-    // Explorer's own Share command (the Windows share window) on the files, through their context menu.
-    if (paths.empty()) return;
-    Com<IShellItemArray> items = ItemsFor(paths);
-    Com<IContextMenu> menu;
-    HRESULT hr = items ? items->BindToHandler(nullptr, BHID_SFUIObject, IID_PPV_ARGS(menu.Put())) : E_FAIL;
-    HMENU m = CreatePopupMenu();
-    if (SUCCEEDED(hr)) hr = menu->QueryContextMenu(m, 0, 1, 0x7FFF, CMF_NORMAL);
-    if (SUCCEEDED(hr)) {
-        CMINVOKECOMMANDINFOEX ci{ sizeof ci };
-        ci.fMask = CMIC_MASK_UNICODE | CMIC_MASK_PTINVOKE;
-        ci.hwnd = MessageWindow();
-        ci.lpVerb = "Windows.ModernShare";
-        ci.lpVerbW = L"Windows.ModernShare";
-        ci.nShow = SW_SHOWNORMAL;
-        ci.ptInvoke = CursorPos();
-        SetForegroundWindow(MessageWindow());   // the share window opens in front of the window that asked
-        hr = menu->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&ci));
-    }
-    DestroyMenu(m);
-    if (FAILED(hr)) {
-        Log(L"actions: share failed (0x%08lx)", hr);
-        cards.Note(L"Share", L"Windows' share window isn't available for these items.", true);
-    }
-}
-
 std::vector<wstring> ExplorerSelection()
 {
     std::vector<wstring> out;

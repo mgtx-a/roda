@@ -162,7 +162,6 @@ const std::vector<Converter>& Converters()
         { L"act.copypath", WheelKind::Actions, L"Copy path", kAnything, Icon::Path, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.terminal", WheelKind::Actions, L"Terminal",  kAnything, Icon::Terminal, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.float",    WheelKind::Actions, L"Float",     kImages, Icon::Float, C::Action, 1, 1, Popup::None, nullptr },
-        { L"act.share",    WheelKind::Actions, L"Share",     kAnything & ~Bit(Kind::Folder), Icon::Share, C::Action, 1, 0, Popup::None, nullptr },
         { L"pack.zip",     WheelKind::Actions, L"ZIP",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         { L"pack.targz",   WheelKind::Actions, L"TAR.GZ",    kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         { L"pack.tar",     WheelKind::Actions, L"TAR",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },

@@ -10,4 +10,6 @@
 - Ask before: choosing a licence, adding a library not in `PLAN.md`, pushing, tagging, releasing.
 - Keep `README.md` (especially Privacy) and `THIRD_PARTY.md` accurate as features land.
 - UI behaviour is only "working" once the user has confirmed it on screen.
-- Trigger self-test: `tests/dragtest.cpp` plays real OLE drags with injected input (moves the pointer).
+- Tests: `bash tests/run_tests.sh <exe>` (CLI conversions over `tests/corpus`, regenerate with
+  `tests/make_corpus.py`); trigger self-test `tests/dragtest.cpp` plays real OLE drags (moves the pointer).
+- Never shadow system headers: no `src/` file may share a name with a C/C++ header (float.h, math.h...).

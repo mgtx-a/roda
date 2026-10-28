@@ -120,9 +120,13 @@ LRESULT Wheel::Handle(UINT m, WPARAM w, LPARAM l)
     switch (m) {
         case WM_MOUSEACTIVATE: return keyboard_ ? MA_ACTIVATE : MA_NOACTIVATE;
         case WM_DPICHANGED: return 0;   // the wheel sizes itself for the monitor it opens on
-        case WM_MOUSEMOVE:
-            if (keyboard_ && open()) SetHot(HitTest(CursorPos()));
+        case WM_MOUSEMOVE: {
+            // Windows sends a move when the wheel appears under the still pointer; that must not steal the
+            // keyboard's highlight.
+            POINT p = CursorPos();
+            if (keyboard_ && open() && (p.x != lastMouse_.x || p.y != lastMouse_.y)) { lastMouse_ = p; SetHot(HitTest(p)); }
             return 0;
+        }
         case WM_LBUTTONUP:
             if (keyboard_ && open()) {
                 int h = HitTest(CursorPos());
@@ -216,6 +220,7 @@ void Wheel::ShowForKeyboard(const std::vector<wstring>& paths)
     Show(WheelKind::Convert, paths, -1);
     if (!shown_) return;
     keyboard_ = true;
+    lastMouse_ = CursorPos();
     // This wheel takes the focus, so the arrows and Enter reach it. The hotkey press lets Roda come to the front.
     SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, GetWindowLongPtrW(hwnd_, GWL_EXSTYLE) & ~WS_EX_NOACTIVATE);
     SetForegroundWindow(hwnd_);

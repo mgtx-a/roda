@@ -76,6 +76,7 @@ private:
     double scale_ = 1;              // DIPs to pixels on this monitor
     double sizeDip_ = 0;            // window side, DIPs
     double keySeenAt_ = -1;
+    POINT lastMouse_{};             // keyboard mode: only a real pointer move takes the highlight
     int chosen_ = -1;
     uint32_t token_ = 0;
     Anim open_, fade_, pulse_;

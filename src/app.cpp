@@ -4,7 +4,7 @@
 #include "anim.h"
 #include "cards.h"
 #include "dragdrop.h"
-#include "float.h"
+#include "floatcard.h"
 #include "gfx.h"
 #include "input.h"
 #include "jobs.h"
@@ -200,7 +200,6 @@ struct App {
             else if (id == L"act.copyrecent") CopyOrMove(paths, o.arg, false, settings, cards);
             else if (id == L"act.copypath") CopyPaths(paths, cards);
             else if (id == L"act.terminal") OpenTerminal(paths, cards);
-            else if (id == L"act.share") Share(paths, cards);
             else if (id == L"act.float") {
                 wstring original = paths[0];
                 Preview(original, 2048, [this, original, at](const wstring& png, int w, int h) {

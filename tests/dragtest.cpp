@@ -2,7 +2,7 @@
 // key input, over a window of its own, so the trigger can be checked without a person.
 //
 //   dragtest.exe <scenario> <file> [<file2> <folder>]
-//   scenarios: file-shift  file-nokey  text-shift  select-shift  mixed-ctrl  file-esc  switch  file-fullscreen
+//   scenarios: file-shift  file-nokey  text-shift  select-shift  mixed-ctrl  file-esc  switch  file-fullscreen  file-alt
 //
 // Or with a real app as the drag source (found with UI Automation):
 //   dragtest.exe ext <source> <item|-> <shift|ctrl|alt|none> [selectall|textdrag|select|titlebar]
@@ -461,7 +461,7 @@ int wmain(int argc, wchar_t** argv)
         if (sc == L"file-nokey") {
             Glide(px, py, px - 200, py - 100, 10, 15);
         } else {
-            WORD key = Trigger(sc == L"mixed-ctrl" ? VK_CONTROL : VK_SHIFT);
+            WORD key = Trigger(sc == L"mixed-ctrl" ? VK_CONTROL : sc == L"file-alt" ? VK_MENU : VK_SHIFT);
             Key(key, true);
             Sleep(60);
             Glide(px, py, px, py - 3, 2, 15);   // the next move reaches the wheel

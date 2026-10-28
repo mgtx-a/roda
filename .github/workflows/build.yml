@@ -33,6 +33,9 @@ jobs:
           ZIG: zig
         run: ./build.sh out all
 
+      - name: Test (CLI conversions over tests/corpus)
+        run: bash tests/run_tests.sh out/x64/Roda.exe
+
       - name: Name and checksum
         id: sum
         run: |
