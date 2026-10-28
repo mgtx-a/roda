@@ -1,12 +1,18 @@
 // The application: single instance, tray icon and menu, and the main loop.
 // Nothing runs at idle: the loop sleeps until a message, a scheduled job or a frame is due.
+#include "actions.h"
 #include "anim.h"
+#include "cards.h"
 #include "dragdrop.h"
+#include "float.h"
 #include "gfx.h"
 #include "input.h"
+#include "jobs.h"
+#include "popup.h"
 #include "wheel.h"
 #include "worker.h"
 
+#include <map>
 #include <mutex>
 
 namespace rd {
@@ -16,6 +22,7 @@ namespace {
 constexpr UINT WM_RUN = WM_APP + 1;
 constexpr UINT WM_TRAY = WM_APP + 2;
 constexpr UINT_PTR TIMER_MODAL = 99;
+constexpr int HOTKEY_WHEEL = 1;
 
 enum Cmd { CmdOutput = 1, CmdPause, CmdStartup, CmdSettings, CmdLog, CmdQuit };
 
@@ -79,13 +86,18 @@ struct App {
     Settings settings;
     Wheel wheel;
     Trigger trigger;
+    Jobs jobs;
+    Cards cards;
+    OptionsPopup popup;
+    std::vector<std::unique_ptr<FloatCard>> floats;
+    std::map<int, std::function<void(const JobState&)>> waiting;   // quiet jobs (previews): who wants the result
     HINSTANCE inst = nullptr;
     NOTIFYICONDATAW nid{};
-    bool trayAdded = false;
+    bool trayAdded = false, hotkey = false, fastTimer = false;
     double nextFrame = 0, lastFrame = 0;
     UINT taskbarCreated = 0;
 
-    App() : trigger(settings, wheel) {}
+    App() : wheel(settings), trigger(settings, wheel) {}
 
     bool Start(HINSTANCE hInst)
     {
@@ -97,11 +109,20 @@ struct App {
             Scale(), int(Monitors().size()));
 
         if (!wheel.Create(inst) || !trigger.Create(inst)) Log(L"could not create the wheel or the probe; dragging will not open the wheel");
-        wheel.onChoose = [](WheelKind k, const wstring& label, const std::vector<wstring>& paths) {
-            Log(L"chosen: %s > %s, on %d item(s):", WheelName(k), label.c_str(), int(paths.size()));
-            for (size_t i = 0; i < paths.size() && i < 50; i++) Log(L"  %s", paths[i].c_str());
+        if (!cards.Create(inst) || !popup.Create(inst)) Log(L"could not create the cards or the options popup");
+        wheel.onChoose = [this](const WheelOption& o, const std::vector<wstring>& paths, POINT at) { Chosen(o, paths, at); };
+        jobs.onChange = [this](const JobState& s) {
+            if (!s.quiet) { cards.Update(s); return; }
+            if (s.phase != JobState::Done && s.phase != JobState::Failed && s.phase != JobState::Cancelled) return;
+            auto it = waiting.find(s.id);
+            if (it == waiting.end()) return;
+            auto fn = std::move(it->second);
+            waiting.erase(it);
+            fn(s);
         };
+        cards.onCancel = [this](int id) { jobs.Cancel(id); };
         if (!settings.paused) trigger.Enable(true);
+        RegisterWheelHotkey();
 
         taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
         SetUpTray();
@@ -111,6 +132,9 @@ struct App {
 
     void Shutdown()
     {
+        jobs.CancelAll();
+        if (hotkey) UnregisterHotKey(g_msg, HOTKEY_WHEEL);
+        if (fastTimer) timeEndPeriod(1);
         trigger.Enable(false);
         if (trayAdded) Shell_NotifyIconW(NIM_DELETE, &nid);
         DeleteTree(TempDir());
@@ -123,6 +147,103 @@ struct App {
         K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc), sizeof pmc);
         Log(L"mem private=%llu KB ws=%llu KB", (unsigned long long)(pmc.PrivateUsage >> 10), (unsigned long long)(pmc.WorkingSetSize >> 10));
         After(5, [this] { WatchMemory(); });
+    }
+
+    // ------------------------------------------------------------ choosing an option
+
+    /// Quality, metadata and output folder from the settings, for every job.
+    Job MakeJob(const wstring& op, std::vector<wstring> inputs, const Json& extra)
+    {
+        Job j;
+        j.op = op;
+        j.inputs = std::move(inputs);
+        j.outDir = settings.outputFolder;
+        j.opts.Set(L"jpegQ", settings.jpegQuality).Set(L"webpQ", settings.webpQuality).Set(L"keepMeta", settings.keepMetadata);
+        for (auto& [k, v] : extra.obj) j.opts.Set(k.c_str(), v);
+        return j;
+    }
+
+    void Submit(const WheelOption& o, const std::vector<wstring>& paths, const Json& extra)
+    {
+        const Converter* c = o.conv;
+        if (c->mode == Converter::AllInOne) {
+            wstring title = paths.size() == 1 ? FileName(paths[0]) : std::to_wstring(paths.size()) + L" items";
+            jobs.Submit(MakeJob(c->id, paths, extra), title, o.label);
+        } else {
+            for (auto& p : paths) jobs.Submit(MakeJob(c->id, { p }, extra), FileName(p), o.label);
+        }
+    }
+
+    /// A downscaled PNG of `path`, made by a worker, then `then(previewPath, origW, origH)`.
+    void Preview(const wstring& path, int maxSide, std::function<void(const wstring&, int, int)> then)
+    {
+        Job j = MakeJob(L"prep.preview", { path }, Json::Object().Set(L"max", maxSide));
+        static int n = 0;
+        j.outPath = JoinPath(TempDir(), L"preview-" + std::to_wstring(++n) + L".png");
+        j.outDir.clear();
+        int id = jobs.Submit(j, FileName(path), L"Preview", true);
+        waiting[id] = [this, then, path](const JobState& s) {
+            if (s.phase != JobState::Done) { cards.Note(FileName(path), s.error.empty() ? L"Could not open this picture." : s.error, true); return; }
+            then(s.out, int(s.info[L"info"][L"w"].Num()), int(s.info[L"info"][L"h"].Num()));
+        };
+    }
+
+    void Chosen(const WheelOption& o, const std::vector<wstring>& paths, POINT at)
+    {
+        const Converter* c = o.conv;
+        Log(L"chosen: %s (%s) on %d item(s)", o.label.c_str(), c->id, int(paths.size()));
+        cards.AnchorAt(at);
+        wstring id = c->id;
+        if (c->mode == Converter::Action) {
+            if (id == L"act.copyto") CopyOrMove(paths, L"", false, settings, cards);
+            else if (id == L"act.moveto") CopyOrMove(paths, L"", true, settings, cards);
+            else if (id == L"act.copyrecent") CopyOrMove(paths, o.arg, false, settings, cards);
+            else if (id == L"act.copypath") CopyPaths(paths, cards);
+            else if (id == L"act.terminal") OpenTerminal(paths, cards);
+            else if (id == L"act.share") Share(paths, cards);
+            else if (id == L"act.float") {
+                wstring original = paths[0];
+                Preview(original, 2048, [this, original, at](const wstring& png, int w, int h) {
+                    auto f = std::make_unique<FloatCard>(original, png, w, h, at);
+                    if (f->ok()) floats.push_back(std::move(f));
+                });
+            }
+            return;
+        }
+        if (c->popup == Popup::None) { Submit(o, paths, Json::Object()); return; }
+
+        // Options first: the popup opens where the wheel was.
+        popup.onApply = [this, o, paths](const Json& opts) {
+            if (opts.has(L"q")) { settings.compressQuality = int(opts[L"q"].Num()); settings.Save(); }
+            Submit(o, paths, opts);
+        };
+        wstring title = paths.size() == 1 ? o.label + L" " + FileName(paths[0]) : o.label + L" " + std::to_wstring(paths.size()) + L" pictures";
+        if (c->popup == Popup::Quality) popup.Show(Popup::Quality, L"Compress", at, settings.compressQuality);
+        else if (c->popup == Popup::Size) popup.Show(Popup::Size, L"Resize to", at, 0);
+        else if (c->popup == Popup::Crop) {
+            Preview(paths[0], 1200, [this, at, title](const wstring& png, int w, int h) { popup.Show(Popup::Crop, title, at, 0, png, w, h); });
+        }
+    }
+
+    // ------------------------------------------------------------ keyboard route
+
+    void RegisterWheelHotkey()
+    {
+        hotkey = RegisterHotKey(g_msg, HOTKEY_WHEEL, UINT(settings.hotkeyMods) | MOD_NOREPEAT, UINT(settings.hotkeyKey)) != FALSE;
+        if (!hotkey) Log(L"hotkey: could not register it (another app uses it); change hotkeyMods/hotkeyKey in settings.json");
+    }
+
+    void OnHotkey()
+    {
+        if (settings.paused || wheel.open()) return;
+        auto paths = ExplorerSelection();
+        if (paths.empty()) {
+            cards.AnchorAt(CursorPos());
+            cards.Note(L"Nothing selected", L"Select files in Explorer or on the desktop, then press the hotkey.");
+            return;
+        }
+        Log(L"hotkey: %d item(s) selected in Explorer", int(paths.size()));
+        wheel.ShowForKeyboard(paths);
     }
 
     // ------------------------------------------------------------ tray
@@ -192,7 +313,12 @@ struct App {
 
     // ------------------------------------------------------------ frames and the loop
 
-    bool NeedFrame() const { return AnyAnimating() || wheel.dirty() || g_frameWanted; }
+    bool NeedFrame() const
+    {
+        if (AnyAnimating() || wheel.dirty() || cards.dirty() || popup.dirty() || g_frameWanted) return true;
+        for (auto& f : floats) if (f->dirty()) return true;
+        return false;
+    }
 
     void Frame()
     {
@@ -202,6 +328,18 @@ struct App {
         g_frameWanted = false;
         StepAll(dt);
         wheel.Draw();
+        cards.Draw();
+        if (popup.shown()) popup.Draw();
+        for (auto& f : floats) f->Draw();
+        floats.erase(std::remove_if(floats.begin(), floats.end(), [](auto& f) { return f->closed(); }), floats.end());
+    }
+
+    /// 1 ms timer resolution only while something moves or a drag is watched: it costs battery system-wide.
+    void SetFastTimer(bool on)
+    {
+        if (on == fastTimer) return;
+        fastTimer = on;
+        if (on) timeBeginPeriod(1); else timeEndPeriod(1);
     }
 
     void Pump()
@@ -221,7 +359,6 @@ struct App {
 
     int Run()
     {
-        timeBeginPeriod(1);
         MSG msg;
         for (;;) {
             double timeout = -1;
@@ -232,11 +369,12 @@ struct App {
             double due = NextDueIn();
             if (due >= 0) want(due);
 
+            SetFastTimer(NeedFrame() || trigger.NeedsTick());
             DWORD ms = timeout < 0 ? INFINITE : DWORD(std::ceil(timeout * 1000));
             MsgWaitForMultipleObjectsEx(0, nullptr, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
 
             while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-                if (msg.message == WM_QUIT) { timeEndPeriod(1); return int(msg.wParam); }
+                if (msg.message == WM_QUIT) return int(msg.wParam);
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
@@ -259,6 +397,9 @@ LRESULT CALLBACK MsgProc(HWND h, UINT m, WPARAM w, LPARAM l)
         case WM_INPUT:
             if (g_app) g_app->trigger.OnRawInput(reinterpret_cast<HRAWINPUT>(l));
             return DefWindowProcW(h, m, w, l);   // lets Windows free the input
+        case WM_HOTKEY:
+            if (g_app && w == HOTKEY_WHEEL) g_app->OnHotkey();
+            return 0;
         case WM_TRAY:
             if (g_app && (LOWORD(l) == WM_RBUTTONUP || LOWORD(l) == WM_LBUTTONUP)) g_app->TrayMenu();
             return 0;

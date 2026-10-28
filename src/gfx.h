@@ -63,6 +63,7 @@ public:
     int width() const { return w_; }
     int height() const { return h_; }
     bool ready() const { return rt_ && bits_; }
+    ID2D1DCRenderTarget* Target() const { return rt_.Get(); }   // during a frame
 
     /// DIPs to pixels for this surface: the DPI of the monitor its window is on, / 96.
     void SetScale(double s) { if (s != scale_) { scale_ = s; ClearCaches(); } }

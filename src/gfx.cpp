@@ -20,8 +20,11 @@ bool GfxInit()
     return true;
 }
 
+static int g_liveSurfaces = 0;   // render targets in use: the factory can only be replaced at zero
+
 void GfxTrim()
 {
+    if (g_liveSurfaces > 0) return;
     // The factory keeps WARP's device and buffers alive after the last render target is gone;
     // a new factory is cheap, the renderer behind it starts on first use.
     Com<ID2D1Factory> fresh;
@@ -213,6 +216,7 @@ void Surface::Release()
 {
     ClearCaches();
     layer_.Reset();
+    if (rt_) g_liveSurfaces--;
     rt_.Reset();
     if (dib_) { DeleteObject(dib_); dib_ = nullptr; }
     if (mem_) { DeleteDC(mem_); mem_ = nullptr; }
@@ -249,6 +253,7 @@ void Surface::Resize(int w, int h)
         D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
         0, 0, D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE);
     if (FAILED(D2D()->CreateDCRenderTarget(&props, rt_.Put()))) Release();
+    else g_liveSurfaces++;
 }
 
 ID2D1DCRenderTarget* Surface::Begin()

@@ -9,6 +9,7 @@ namespace rd {
 bool RunToImage(const Job& job, const Progress& p, Result& r);     // "to.jpg", "to.png", ...
 bool RunImageTool(const Job& job, const Progress& p, Result& r);   // "tool.*"
 bool RunMergePdf(const Job& job, const Progress& p, Result& r);    // "tool.mergepdf"
+bool RunPreview(const Job& job, const Progress& p, Result& r);     // "prep.preview": PNG at outPath, info = original size
 
 // archive.cpp
 bool RunPack(const Job& job, const Progress& p, Result& r);        // "pack.zip", "pack.tar", "pack.targz"

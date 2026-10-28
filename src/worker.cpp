@@ -171,7 +171,7 @@ int Worker()
     p.part = [](const wstring& path) { PrintLine(Json::Object().Set(L"part", path)); };
     Result r;
     if (!Run(job, p, r)) { PrintLine(Json::Object().Set(L"error", r.error)); return 1; }
-    PrintLine(Json::Object().Set(L"done", r.out).Set(L"before", double(r.before)).Set(L"after", double(r.after)));
+    PrintLine(Json::Object().Set(L"done", r.out).Set(L"before", double(r.before)).Set(L"after", double(r.after)).Set(L"info", r.info));
     return 0;
 }
 

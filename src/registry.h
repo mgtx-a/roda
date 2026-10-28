@@ -55,6 +55,7 @@ struct Result {
     wstring out;                      // the saved file or folder
     wstring error;                    // plain words, for the card
     uint64_t before = 0, after = 0;   // bytes in and out, when it means something
+    Json info = Json::Object();       // anything else the UI wants back (a picture's size)
 };
 
 struct Converter {

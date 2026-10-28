@@ -1,6 +1,7 @@
 #include "wheel.h"
 
 #include "dragdrop.h"
+#include "ui.h"
 
 namespace rd {
 
@@ -9,31 +10,13 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 
 // Geometry, in DIPs.
-constexpr double kCentre = 46;                      // the centre disc: file count, and Cancel
-constexpr double kRing0In = 52, kRing0Out = 148;    // up to 8 options
-constexpr double kRing1In = 154, kRing1Out = 226;   // the rest
+constexpr double kCentre = 48;                      // the centre disc: what is dragged, and Cancel
+constexpr double kRing0In = 54, kRing0Out = 150;    // up to 8 options
+constexpr double kRing1In = 156, kRing1Out = 230;   // the rest
 constexpr double kGrow = 6;                         // a hovered segment reaches out this far
 constexpr double kMargin = 30;                      // room around the disc for the shadow and the hover
 constexpr int kPerRing = 8;
-
-struct Palette {
-    uint32_t ring, sep, edge, hot, text, textHot, centre, centreHot, centreText, dim;
-    float shadow;
-};
-
-const Palette& Colours()
-{
-    // Our own colours: a deep teal accent on a pale (or dark) glass disc.
-    static const Palette light{ 0xF2FAFBFC, 0x1A10202A, 0x2610202A, 0xFF1F7A74, 0xFF1D2430, 0xFFFFFFFF, 0xFFE8EEF0, 0xFFF3D9D9, 0xFF27303C, 0xFF6A7480, 0.28f };
-    static const Palette dark{ 0xF0252A30, 0x26FFFFFF, 0x30FFFFFF, 0xFF2E9E96, 0xFFE8EBEE, 0xFFFFFFFF, 0xFF1B1F24, 0xFF4A2A2C, 0xFFE8EBEE, 0xFF9AA3AD, 0.50f };
-    return DarkMode() ? dark : light;
-}
-
-uint32_t WithAlpha(uint32_t argb, double factor)
-{
-    uint32_t a = uint32_t(std::clamp(((argb >> 24) & 255) * factor, 0.0, 255.0) + 0.5);
-    return (argb & 0x00FFFFFF) | (a << 24);
-}
+constexpr size_t kMagicLimit = 200;                 // beyond this many items, judge by extension (no file reads)
 
 D2D1_POINT_2F Polar(double cx, double cy, double r, double a)
 {
@@ -53,16 +36,6 @@ Com<ID2D1PathGeometry> Sector(double cx, double cy, double rIn, double rOut, dou
     sink->EndFigure(D2D1_FIGURE_END_CLOSED);
     sink->Close();
     return geo;
-}
-
-/// Phase 1 placeholders: the real lists come from the converter registry in Phase 2.
-std::vector<const wchar_t*> PlaceholderOptions(WheelKind k)
-{
-    switch (k) {
-        case WheelKind::Convert: return { L"WEBP", L"PNG", L"JPG", L"PDF", L"TIFF", L"AVIF", L"BMP", L"ICO" };
-        case WheelKind::Tools: return { L"Compress", L"Resize", L"Crop", L"Rotate", L"Flip", L"Strip info", L"Merge PDF" };
-        default: return { L"Copy to", L"Move to", L"Copy path", L"Terminal", L"Float", L"Share" };
-    }
 }
 
 }  // namespace
@@ -99,7 +72,7 @@ private:
 
 // ---------------------------------------------------------------- window
 
-Wheel::Wheel() {}
+Wheel::Wheel(const Settings& settings) : settings_(settings) {}
 
 Wheel::~Wheel()
 {
@@ -126,7 +99,7 @@ bool Wheel::Create(HINSTANCE inst)
     HRESULT hr = RegisterDragDrop(hwnd_, target_);
     if (FAILED(hr)) Log(L"wheel: could not accept drops (0x%08lx)", hr);
     // Load the font now: the first wheel would otherwise wait ~15 ms for DirectWrite.
-    for (float size : { 10.5f, 11.0f, 12.0f, 13.0f })
+    for (float size : { 10.5f, 11.0f, 11.5f, 12.0f, 12.5f, 14.0f })
         for (auto wt : { DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD }) {
             Com<IDWriteTextLayout> layout;
             if (auto* fmt = TextFormat(size, wt)) DWrite()->CreateTextLayout(L"WEBP 0", 6, fmt, 100, 20, layout.Put());
@@ -137,42 +110,78 @@ bool Wheel::Create(HINSTANCE inst)
 LRESULT CALLBACK Wheel::WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (m == WM_NCCREATE) SetWindowLongPtrW(h, GWLP_USERDATA, LONG_PTR(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams));
-    switch (m) {
-        case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
-        case WM_DPICHANGED: return 0;   // the wheel sizes itself for the monitor it opens on
-    }
+    auto* self = reinterpret_cast<Wheel*>(GetWindowLongPtrW(h, GWLP_USERDATA));
+    if (self && self->hwnd_ == h) return self->Handle(m, w, l);
     return DefWindowProcW(h, m, w, l);
 }
 
-bool Wheel::MixedSelection() const
+LRESULT Wheel::Handle(UINT m, WPARAM w, LPARAM l)
 {
-    if (paths_.empty()) return true;
-    wstring first = Extension(paths_[0]);
-    for (auto& p : paths_) {
-        if (DirExists(p) || Extension(p).empty() || Extension(p) != first) return true;
+    switch (m) {
+        case WM_MOUSEACTIVATE: return keyboard_ ? MA_ACTIVATE : MA_NOACTIVATE;
+        case WM_DPICHANGED: return 0;   // the wheel sizes itself for the monitor it opens on
+        case WM_MOUSEMOVE:
+            if (keyboard_ && open()) SetHot(HitTest(CursorPos()));
+            return 0;
+        case WM_LBUTTONUP:
+            if (keyboard_ && open()) {
+                int h = HitTest(CursorPos());
+                if (h >= 0) Choose(h);
+                else if (h == -1) { Log(L"wheel: cancelled"); Hide(); }
+            }
+            return 0;
+        case WM_KEYDOWN: {
+            if (!keyboard_ || !open()) return 0;
+            int n = int(segs_.size());
+            if (w == VK_ESCAPE) { Log(L"wheel: Esc, cancelled"); Hide(); }
+            else if (w == VK_RETURN) { if (hot_ >= 0) Choose(hot_); }
+            else if (w == VK_RIGHT || w == VK_DOWN) SetHot(hot_ < 0 ? 0 : (hot_ + 1) % n);
+            else if (w == VK_LEFT || w == VK_UP) SetHot(hot_ < 0 ? n - 1 : (hot_ + n - 1) % n);
+            else if (w == VK_TAB) {
+                // Tab: the next wheel that has something for these files.
+                bool back = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                for (int step = 1; step <= 2; step++) {
+                    auto k = static_cast<WheelKind>((int(kind_) + (back ? 3 - step : step)) % 3);
+                    WheelKind before = kind_;
+                    Switch(k);
+                    if (kind_ != before) break;
+                }
+                if (!segs_.empty()) SetHot(0);
+            }
+            return 0;
+        }
+        case WM_ACTIVATE:
+            if (keyboard_ && LOWORD(w) == WA_INACTIVE && open()) { Log(L"wheel: closed (another window took the focus)"); Hide(); }
+            return 0;
     }
+    return DefWindowProcW(hwnd_, m, w, l);
+}
+
+bool Wheel::Mixed() const
+{
+    if (kinds_.empty()) return true;
+    for (Kind k : kinds_) if (k == Kind::Folder || k == Kind::Unknown || k != kinds_[0]) return true;
     return false;
 }
 
 wstring Wheel::CentreText() const
 {
     size_t n = paths_.size();
-    if (n == 1 && DirExists(paths_[0])) return L"1 folder";
-    if (MixedSelection()) return std::to_wstring(n) + (n == 1 ? L" item" : L" items");
-    wstring ext = Extension(paths_[0]).substr(1);
-    for (auto& c : ext) c = wchar_t(towupper(c));
-    return std::to_wstring(n) + L" " + ext + (n == 1 ? L" file" : L" files");
+    if (n == 1 && !kinds_.empty() && kinds_[0] == Kind::Folder) return L"1 folder";
+    if (Mixed()) return std::to_wstring(n) + (n == 1 ? L" item" : L" items");
+    return std::to_wstring(n) + L" " + KindLabel(kinds_[0]) + (n == 1 ? L" file" : L" files");
 }
 
-void Wheel::Build()
+bool Wheel::Build()
 {
-    auto opts = PlaceholderOptions(kind_);
+    auto opts = OptionsFor(kind_, kinds_, settings_);
+    if (opts.empty()) return false;
     segs_.clear();
     int n = int(opts.size());
     int inner = std::min(n, kPerRing), outer = n - inner;
     for (int i = 0; i < n; i++) {
         Segment s;
-        s.label = opts[size_t(i)];
+        s.opt = opts[size_t(i)];
         s.ring = i < inner ? 0 : 1;
         int count = s.ring == 0 ? inner : outer, idx = s.ring == 0 ? i : i - inner;
         double step = 2 * kPi / count;
@@ -182,18 +191,40 @@ void Wheel::Build()
         segs_.push_back(std::move(s));
     }
     hot_ = -2;
+    return true;
 }
 
 void Wheel::Show(WheelKind kind, const std::vector<wstring>& paths, double keySeenAt)
 {
     if (!hwnd_) return;
+    keyboard_ = false;
     paths_ = paths;
+    kinds_.clear();
+    // Magic bytes for the first items (so a mislabelled file still gets the right wheel), the name for the rest.
+    for (size_t i = 0; i < paths_.size(); i++) kinds_.push_back(i < kMagicLimit ? KindOfPath(paths_[i]) : KindFromExtension(paths_[i]));
     kind_ = kind;
-    if (kind_ != WheelKind::Actions && MixedSelection()) {
-        Log(L"wheel: folders or mixed file types, so the Actions wheel opens instead of %s", WheelName(kind));
+    if (!Build()) {
+        Log(L"wheel: %s has nothing for %s, so the Actions wheel opens", WheelName(kind), CentreText().c_str());
         kind_ = WheelKind::Actions;
+        if (!Build()) return;
     }
-    Build();
+    Open(keySeenAt);
+}
+
+void Wheel::ShowForKeyboard(const std::vector<wstring>& paths)
+{
+    Show(WheelKind::Convert, paths, -1);
+    if (!shown_) return;
+    keyboard_ = true;
+    // This wheel takes the focus, so the arrows and Enter reach it. The hotkey press lets Roda come to the front.
+    SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, GetWindowLongPtrW(hwnd_, GWL_EXSTYLE) & ~WS_EX_NOACTIVATE);
+    SetForegroundWindow(hwnd_);
+    SetFocus(hwnd_);
+    SetHot(0);
+}
+
+void Wheel::Open(double keySeenAt)
+{
     token_++;
     shown_ = true; closing_ = false; dropped_ = false; chosen_ = -1;
     keySeenAt_ = keySeenAt;
@@ -225,21 +256,23 @@ void Wheel::Show(WheelKind kind, const std::vector<wstring>& paths, double keySe
     SetWindowPos(hwnd_, HWND_TOPMOST, frame_.left, frame_.top, px, px, SWP_NOACTIVATE);
     Draw();   // the first frame now, not on the next pass of the loop
     ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-    Log(L"wheel: %s opened for %s at %.0f%% scale", WheelName(kind_), CentreText().c_str(), scale_ * 100);
+    Log(L"wheel: %s opened for %s at %.0f%% scale (%d options)", WheelName(kind_), CentreText().c_str(), scale_ * 100, int(segs_.size()));
 }
 
 void Wheel::Switch(WheelKind kind)
 {
     if (!shown_ || closing_ || kind == kind_) return;
-    if (kind != WheelKind::Actions && MixedSelection()) return;
-    size_t before = segs_.size();
+    WheelKind before = kind_;
+    size_t count = segs_.size();
     kind_ = kind;
-    Build();
-    bool sizeChanged = (before > size_t(kPerRing)) != (segs_.size() > size_t(kPerRing));
+    if (!Build()) { kind_ = before; Build(); return; }   // nothing there for these files: stay
+    bool sizeChanged = (count > size_t(kPerRing)) != (segs_.size() > size_t(kPerRing));
     if (sizeChanged) {
         // The other wheel needs another window size: re-open it under the pointer.
-        auto paths = paths_;
-        Show(kind, paths, -1);
+        bool kb = keyboard_;
+        Open(-1);
+        keyboard_ = kb;
+        Log(L"wheel: switched to %s", WheelName(kind_));
         return;
     }
     if (!ReducedMotion()) { open_.Set(0.94); open_.Spring(1, 0.2, 0.8); }
@@ -254,6 +287,10 @@ void Wheel::Hide(bool animated)
     closing_ = true;
     if (!animated || ReducedMotion()) fade_.Set(0);
     else { fade_.Ease(0, 0.12, Curve::EaseIn); open_.Ease(0.92, 0.12, Curve::EaseIn); }
+    if (keyboard_) {
+        keyboard_ = false;
+        SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, GetWindowLongPtrW(hwnd_, GWL_EXSTYLE) | WS_EX_NOACTIVATE);
+    }
     dirty_ = true;
     RequestFrame();
 }
@@ -302,6 +339,27 @@ void Wheel::SetHot(int i)
     RequestFrame();
 }
 
+void Wheel::Choose(int h)
+{
+    dropped_ = true;
+    chosen_ = h;
+    SetHot(h);
+    WheelOption opt = segs_[size_t(h)].opt;
+    auto paths = paths_;
+    POINT at = centre_;
+    if (ReducedMotion()) Hide(false);
+    else {
+        // The chosen segment pulses, then the wheel shrinks away.
+        pulse_.Set(0);
+        pulse_.Ease(1, 0.14, Curve::EaseOut);
+        uint32_t t = token_;
+        After(0.14, [this, t] { if (t == token_) { pulse_.Ease(0, 0.1, Curve::EaseIn); Hide(); } });
+    }
+    // Run it after the drop has returned: the drag source (Explorer) waits inside DoDragDrop until then,
+    // and a folder picker or a popup must not keep it frozen.
+    if (onChoose) After(0, [this, opt, paths, at] { if (onChoose) onChoose(opt, paths, at); });
+}
+
 DWORD Wheel::OnDragOver(POINTL pt, DWORD allowed)
 {
     if (!shown_ || closing_) return DROPEFFECT_NONE;
@@ -331,19 +389,8 @@ DWORD Wheel::OnDrop(IDataObject* data, POINTL pt, DWORD allowed)
         return DROPEFFECT_NONE;
     }
     std::vector<wstring> paths;
-    if (!ReadDroppedPaths(data, paths)) paths = paths_;
-    dropped_ = true;
-    chosen_ = h;
-    SetHot(h);
-    if (onChoose) onChoose(kind_, segs_[size_t(h)].label, paths);
-
-    if (ReducedMotion()) Hide(false);
-    else {
-        pulse_.Set(0);
-        pulse_.Ease(1, 0.14, Curve::EaseOut);
-        uint32_t t = token_;
-        After(0.14, [this, t] { if (t == token_) { pulse_.Ease(0, 0.1, Curve::EaseIn); Hide(); } });
-    }
+    if (ReadDroppedPaths(data, paths)) paths_ = paths;
+    Choose(h);
     return CopyEffect(allowed);
 }
 
@@ -367,24 +414,25 @@ void Wheel::Draw()
         surf_.Release();   // a hidden wheel holds no pixels
         shown_ = closing_ = false;
         paths_.clear();
+        kinds_.clear();
         segs_.clear();
         uint32_t t = ++token_;
-        // Drop the renderer's memory once the wheel has stayed closed for a moment.
+        // Drop the renderer's memory once nothing has been on screen for a moment.
         After(1.5, [this, t] { if (t == token_ && !shown_) GfxTrim(); });
         return;
     }
     ID2D1DCRenderTarget* rt = surf_.Begin();
     if (!rt) return;
-    const Palette& pal = Colours();
+    const Theme& th = CurrentTheme();
     float s = float(scale_), k = float(open_.value);
     float c = float(sizeDip_ / 2);
     rt->SetTransform(D2D1::Matrix3x2F::Scale(k, k, D2D1::Point2F(c, c)) * D2D1::Matrix3x2F::Scale(s, s));
 
     bool twoRings = segs_.size() > size_t(kPerRing);
     float R = float(twoRings ? kRing1Out : kRing0Out);
-    surf_.DrawShadow(RectF(c - R, c - R, 2 * R, 2 * R), R, 20, 0, 6, pal.shadow);
-    rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), R, R), surf_.Solid(pal.ring));
-    rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), R - 0.5f, R - 0.5f), surf_.Solid(pal.edge), 1.0f);   // under the segments: a hovered one reaches past it
+    surf_.DrawShadow(RectF(c - R, c - R, 2 * R, 2 * R), R, 20, 0, 6, th.shadow);
+    rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), R, R), surf_.Solid(th.glass));
+    rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), R - 0.5f, R - 0.5f), surf_.Solid(th.edge), 1.0f);   // under the segments: a hovered one reaches past it
 
     for (size_t i = 0; i < segs_.size(); i++) {
         const auto& sg = segs_[i];
@@ -393,32 +441,49 @@ void Wheel::Draw()
         double pulse = int(i) == chosen_ ? pulse_.value : 0;
         if (hv > 0.01) {
             auto geo = Sector(c, c, rIn + 2, rOut + kGrow * hv + 4 * pulse, sg.a0 + 0.012, sg.a1 - 0.012);
-            if (geo) rt->FillGeometry(geo.Get(), surf_.Solid(WithAlpha(pal.hot, std::min(1.0, hv))));
+            if (geo) rt->FillGeometry(geo.Get(), surf_.Solid(WithAlpha(th.accent, std::min(1.0, hv))));
         }
-        if (segs_.size() > 1) rt->DrawLine(Polar(c, c, rIn + 4, sg.a0), Polar(c, c, rOut - 4, sg.a0), surf_.Solid(pal.sep), 1.0f);
+        if (segs_.size() > 1) rt->DrawLine(Polar(c, c, rIn + 4, sg.a0), Polar(c, c, rOut - 4, sg.a0), surf_.Solid(th.sep), 1.0f);
 
-        float size = sg.ring == 0 ? 13.0f : 12.0f;
-        DWRITE_FONT_WEIGHT wt = DWRITE_FONT_WEIGHT_SEMI_BOLD;
+        // Icon above the label for tools and actions; formats are their own label, set a little larger.
+        bool icon = sg.opt.icon != Icon::None;
+        float size = icon ? (sg.ring == 0 ? 11.5f : 10.5f) : (sg.ring == 0 ? 14.0f : 12.5f);
+        DWRITE_FONT_WEIGHT wt = icon ? DWRITE_FONT_WEIGHT_NORMAL : DWRITE_FONT_WEIGHT_SEMI_BOLD;
         D2D1_POINT_2F mid = Polar(c, c, (rIn + rOut) / 2 + kGrow * hv / 2, (sg.a0 + sg.a1) / 2);
-        float w = surf_.MeasureText(sg.label.c_str(), size, wt);
-        uint32_t col = hv > 0.5 ? pal.textHot : pal.text;
-        surf_.DrawText(sg.label.c_str(), size, wt, D2D1::RectF(mid.x - w / 2, mid.y - size * 0.68f, mid.x + w / 2 + 2, mid.y + size), col);
+        uint32_t col = hv > 0.5 ? th.accentText : th.text;
+        float maxW = float(sg.ring == 0 ? 78 : 66);
+        wstring label = Ellipsize(surf_, sg.opt.label, size, wt, maxW);
+        float w = surf_.MeasureText(label.c_str(), size, wt);
+        if (icon) {
+            float is = sg.ring == 0 ? 20.0f : 17.0f;
+            DrawIcon(surf_, sg.opt.icon, D2D1::Point2F(mid.x, mid.y - is * 0.45f), is, col);
+            surf_.DrawText(label.c_str(), size, wt, D2D1::RectF(mid.x - w / 2, mid.y + is * 0.3f, mid.x + w / 2 + 2, mid.y + is * 0.3f + size * 1.5f), col);
+        } else {
+            surf_.DrawText(label.c_str(), size, wt, D2D1::RectF(mid.x - w / 2, mid.y - size * 0.68f, mid.x + w / 2 + 2, mid.y + size), col);
+        }
     }
-    if (twoRings) rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), float(kRing0Out + 3), float(kRing0Out + 3)), surf_.Solid(pal.sep), 1.0f);
+    if (twoRings) rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), float(kRing0Out + 3), float(kRing0Out + 3)), surf_.Solid(th.sep), 1.0f);
 
-    // The centre: what is being dragged, and Cancel.
+    // The centre: what is being dragged, which wheel, and Cancel.
     bool cancelHot = hot_ == -1;
     float cr = float(kCentre);
-    rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), cr, cr), surf_.Solid(cancelHot ? pal.centreHot : pal.centre));
-    wstring top = cancelHot ? L"Cancel" : CentreText();
-    const wchar_t* bottom = cancelHot ? L"" : WheelName(kind_);
-    float ts = top.size() > 12 ? 10.5f : 12.0f;
-    float tw = surf_.MeasureText(top.c_str(), ts, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    float ty = cancelHot ? c - ts * 0.68f : c - ts - 2;
-    surf_.DrawText(top.c_str(), ts, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(c - tw / 2, ty, c + tw / 2 + 2, ty + ts * 1.6f), pal.centreText);
-    if (*bottom) {
-        float bw = surf_.MeasureText(bottom, 11, DWRITE_FONT_WEIGHT_NORMAL);
-        surf_.DrawText(bottom, 11, DWRITE_FONT_WEIGHT_NORMAL, D2D1::RectF(c - bw / 2, c + 3, c + bw / 2 + 2, c + 20), pal.dim);
+    rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), cr, cr), surf_.Solid(cancelHot ? th.hubHot : th.hub));
+    if (cancelHot) {
+        float tw = surf_.MeasureText(L"Cancel", 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        surf_.DrawText(L"Cancel", 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(c - tw / 2, c - 8.5f, c + tw / 2 + 2, c + 12), th.text);
+    } else {
+        wstring top = Ellipsize(surf_, CentreText(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, 84);
+        float tw = surf_.MeasureText(top.c_str(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        surf_.DrawText(top.c_str(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(c - tw / 2, c - 17, c + tw / 2 + 2, c + 2), th.text);
+        const wchar_t* name = WheelName(kind_);
+        float bw = surf_.MeasureText(name, 11, DWRITE_FONT_WEIGHT_NORMAL);
+        surf_.DrawText(name, 11, DWRITE_FONT_WEIGHT_NORMAL, D2D1::RectF(c - bw / 2, c + 1, c + bw / 2 + 2, c + 16), th.dim);
+        // Three dots: Convert, Tools, Actions; the open one filled.
+        for (int i = 0; i < 3; i++) {
+            D2D1_POINT_2F d = D2D1::Point2F(c - 9 + i * 9.0f, c + 24);
+            if (i == int(kind_)) rt->FillEllipse(D2D1::Ellipse(d, 2.6f, 2.6f), surf_.Solid(th.accent));
+            else rt->DrawEllipse(D2D1::Ellipse(d, 2.2f, 2.2f), surf_.Solid(th.dim), 0.9f);
+        }
     }
 
     surf_.End();

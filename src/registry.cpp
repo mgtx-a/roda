@@ -157,6 +157,8 @@ const std::vector<Converter>& Converters()
         // Actions: anything, folders and mixed selections included. Run by the UI, except packing.
         { L"act.copyto",   WheelKind::Actions, L"Copy to…",  kAnything, Icon::Copy, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.moveto",   WheelKind::Actions, L"Move to…",  kAnything, Icon::Move, C::Action, 1, 0, Popup::None, nullptr },
+        // A recent "Copy to" folder: one segment per folder, added below.
+        { L"act.copyrecent", WheelKind::Actions, L"",        kAnything, Icon::Folder, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.copypath", WheelKind::Actions, L"Copy path", kAnything, Icon::Path, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.terminal", WheelKind::Actions, L"Terminal",  kAnything, Icon::Terminal, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.float",    WheelKind::Actions, L"Float",     kImages, Icon::Float, C::Action, 1, 1, Popup::None, nullptr },
@@ -164,8 +166,8 @@ const std::vector<Converter>& Converters()
         { L"pack.zip",     WheelKind::Actions, L"ZIP",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         { L"pack.targz",   WheelKind::Actions, L"TAR.GZ",    kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         { L"pack.tar",     WheelKind::Actions, L"TAR",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
-        // A recent "Copy to" folder: one segment per folder, added below.
-        { L"act.copyrecent", WheelKind::Actions, L"",        kAnything, Icon::Folder, C::Action, 1, 0, Popup::None, nullptr },
+        // Not on any wheel (accepts nothing): a downscaled PNG for Float and the crop popup.
+        { L"prep.preview", WheelKind::Actions, L"", 0, Icon::None, C::PerFile, 1, 1, Popup::None, RunPreview },
     };
     return table;
 }

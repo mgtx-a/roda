@@ -195,8 +195,32 @@ int WicOrientation(IWICBitmapFrameDecode* frame)
     return o >= 1 && o <= 8 ? o : 1;
 }
 
+/// WIC fills the missing rows of a cut-off PNG or JPEG instead of failing; Roda refuses those files, so a
+/// half-grey picture is never saved as if it were fine.
+bool Truncated(const std::vector<uint8_t>& b, Kind kind)
+{
+    if (kind == Kind::Png) {
+        size_t from = b.size() > 64 ? b.size() - 64 : 0;
+        for (size_t i = from; i + 4 <= b.size(); i++) if (memcmp(&b[i], "IEND", 4) == 0) return false;
+        return true;
+    }
+    if (kind == Kind::Jpeg) {
+        // Entropy-coded data can't contain FF DA or FF D9 (FF is followed by 00 there), so the end
+        // marker must come after the last start of scan.
+        size_t lastSos = 0, lastEoi = 0;
+        for (size_t i = 0; i + 1 < b.size(); i++) {
+            if (b[i] != 0xFF) continue;
+            if (b[i + 1] == 0xDA) lastSos = i;
+            else if (b[i + 1] == 0xD9) lastEoi = i;
+        }
+        return lastEoi < lastSos;
+    }
+    return false;
+}
+
 bool DecodeWic(const std::vector<uint8_t>& b, Kind kind, Image& img, wstring& err)
 {
+    if (Truncated(b, kind)) { err = L"This image is damaged (the file ends too early)."; return false; }
     auto* f = Factory();
     Com<IWICStream> st;
     Com<IWICBitmapDecoder> dec;
@@ -708,6 +732,25 @@ bool RunImageTool(const Job& job, const Progress& p, Result& r)
     if (outKind == Kind::Jpeg && img.kind == Kind::Jpeg && keepMeta) CopyJpegMetadata(bytes, out);
     p.Set(0.9);
     return WriteOutput(job, in, BaseName(in) + L" " + suffix, ExtOf(outKind), out, p, r);
+}
+
+bool RunPreview(const Job& job, const Progress& p, Result& r)
+{
+    // A picture the UI can show (Float, the crop popup) without decoding the file itself.
+    Image img;
+    std::vector<uint8_t> bytes, out;
+    if (job.outPath.empty()) { r.error = L"No place for the preview."; return false; }
+    if (!DecodeImage(job.inputs[0], img, bytes, r.error)) return false;
+    r.info.Set(L"w", img.w).Set(L"h", img.h);
+    int longest = std::clamp(Opt(job, L"max", 2048), 64, 8192);
+    int side = std::max(img.w, img.h);
+    if (side > longest) {
+        double k = double(longest) / side;
+        if (!Resize(img, std::max(1, int(std::lround(img.w * k))), std::max(1, int(std::lround(img.h * k))), r.error)) return false;
+    }
+    if (!EncodeImage(img, Kind::Png, 0, true, out, r.error)) return false;
+    p.Set(0.9);
+    return WriteOutput(job, job.inputs[0], L"", L".png", out, p, r);
 }
 
 bool RunMergePdf(const Job& job, const Progress& p, Result& r)

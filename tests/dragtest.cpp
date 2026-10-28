@@ -26,6 +26,7 @@
 #include <shobjidl.h>
 #include <uiautomation.h>
 
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <thread>
@@ -257,6 +258,17 @@ static void Chord(WORD mod, WORD vk)
     Key(mod, true); Key(vk, true); Key(vk, false); Key(mod, false);
 }
 
+/// DRAGTEST_KEYS=<convert>,<tools>,<actions> (hex virtual keys): play other trigger keys, so a test copy
+/// of Roda with those keys set can run while another copy (with the default keys) is in use.
+static WORD Trigger(WORD vk)
+{
+    const wchar_t* e = _wgetenv(L"DRAGTEST_KEYS");
+    if (!e) return vk;
+    unsigned k[3] = { VK_SHIFT, VK_CONTROL, VK_MENU };
+    swscanf(e, L"%x,%x,%x", &k[0], &k[1], &k[2]);
+    return vk == VK_SHIFT ? WORD(k[0]) : vk == VK_CONTROL ? WORD(k[1]) : vk == VK_MENU ? WORD(k[2]) : vk;
+}
+
 static WORD KeyNamed(const std::wstring& k)
 {
     if (k == L"shift") return VK_SHIFT;
@@ -324,7 +336,7 @@ static int RunExternal(const std::wstring& source, const std::wstring& item, con
         else at = (r.right - r.left) > 2 * (r.bottom - r.top) ? POINT{ r.left + 30, (r.top + r.bottom) / 2 } : POINT{ (r.left + r.right) / 2, (r.top + r.bottom) / 2 - 8 };
     }
 
-    WORD key = KeyNamed(keyName);
+    WORD key = Trigger(KeyNamed(keyName));
     int tx = hx + hw / 2, ty = hy + hh / 2 + 100;   // where the key is pressed: over the helper's window
     bool inPlace = opt == L"select" || opt == L"titlebar";
     std::thread input([&] {
@@ -449,7 +461,7 @@ int wmain(int argc, wchar_t** argv)
         if (sc == L"file-nokey") {
             Glide(px, py, px - 200, py - 100, 10, 15);
         } else {
-            WORD key = sc == L"mixed-ctrl" ? VK_CONTROL : VK_SHIFT;
+            WORD key = Trigger(sc == L"mixed-ctrl" ? VK_CONTROL : VK_SHIFT);
             Key(key, true);
             Sleep(60);
             Glide(px, py, px, py - 3, 2, 15);   // the next move reaches the wheel
@@ -460,12 +472,16 @@ int wmain(int argc, wchar_t** argv)
             } else if (sc == L"switch") {
                 Key(key, false);
                 Sleep(60);
-                Key(VK_CONTROL, true);         // Ctrl switches to the Tools wheel
+                Key(Trigger(VK_CONTROL), true);   // Ctrl switches to the Tools wheel
                 Sleep(80);
                 Glide(px, py - 3, px, py - 100, 12, 15);
-                Key(VK_CONTROL, false);
+                Key(Trigger(VK_CONTROL), false);
             } else {
-                Glide(px, py - 3, px, py - 100, 12, 15);   // up onto the top segment
+                // DRAGTEST_ANGLE=<degrees clockwise from the top>: which segment to drop on (default: the top one).
+                const wchar_t* ang = _wgetenv(L"DRAGTEST_ANGLE");
+                double a = ang ? _wtof(ang) * 3.14159265358979 / 180 : 0;
+                int r = ang && wcschr(ang, L'o') ? 190 : 100;   // "225o": the outer ring
+                Glide(px, py - 3, px + int(r * sin(a)), py - 3 - int(r * cos(a)), 12, 15);
                 // DRAGTEST_HOLD=<ms>: wait over the segment, so a screenshot can be taken.
                 if (const wchar_t* hold = _wgetenv(L"DRAGTEST_HOLD")) Sleep(DWORD(_wtoi(hold)));
             }
