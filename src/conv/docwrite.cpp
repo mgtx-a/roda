@@ -632,8 +632,11 @@ bool WriteLaidDocx(const std::vector<LaidPage>& pages, const wstring& title, std
                 char color[8];
                 snprintf(color, sizeof color, "%06X", unsigned(p.color & 0xFFFFFF));
                 std::string size = std::to_string(std::max(2L, std::lround(p.size * 2)));   // half points
+                long spacing = t.stretch != 1 ? 0 : std::lround(t.spacing * 20);   // twentieths of a point; stretched letters need none
                 body += "<w:r><w:rPr><w:rFonts w:ascii=\"" + font + "\" w:hAnsi=\"" + font + "\" w:cs=\"" + font + "\"/>" + (p.bold ? "<w:b/>" : "") +
-                        (p.italic ? "<w:i/>" : "") + "<w:color w:val=\"" + color + "\"/><w:sz w:val=\"" + size + "\"/><w:szCs w:val=\"" + size + "\"/></w:rPr>"
+                        (p.italic ? "<w:i/>" : "") + "<w:color w:val=\"" + color + "\"/>" + (spacing ? "<w:spacing w:val=\"" + std::to_string(spacing) + "\"/>" : "") +
+                        (t.stretch != 1 ? "<w:w w:val=\"" + std::to_string(std::lround(t.stretch * 100)) + "\"/>" : "") +
+                        "<w:sz w:val=\"" + size + "\"/><w:szCs w:val=\"" + size + "\"/></w:rPr>"
                         "<w:t xml:space=\"preserve\">" + XmlEscape(p.text) + "</w:t></w:r>";
             }
             body += "</w:p>";
@@ -767,12 +770,12 @@ std::string EmptyTree()
 
 }  // namespace
 
-bool WritePptx(const std::vector<Image>& slides, std::vector<uint8_t>& out, wstring& err)
+bool WritePptx(const std::vector<LaidPage>& slides, std::vector<uint8_t>& out, wstring& err)
 {
     if (slides.empty()) { err = L"Nothing to put on slides."; return false; }
     // The slide takes the first page's shape, 10 inches wide.
     const long long cx = 9144000;
-    long long cy = std::clamp((long long)(cx * double(slides[0].h) / std::max(1, slides[0].w)), 914400LL, 51206400LL);
+    long long cy = std::clamp((long long)(cx * slides[0].h / std::max(1.0, slides[0].w)), 914400LL, 51206400LL);
     std::string pre = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>";
     std::string types = pre + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
         "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>"
@@ -788,23 +791,51 @@ bool WritePptx(const std::vector<Image>& slides, std::vector<uint8_t>& out, wstr
     ZipOut z;
     bool ok = true;
     for (size_t i = 0; i < slides.size(); i++) {
+        const LaidPage& pg = slides[i];
         std::string n = std::to_string(i + 1);
-        std::vector<uint8_t> png;
-        if (!EncodeImage(slides[i], Kind::Png, 0, true, png, err)) return false;
-        ok = ok && z.Add("ppt/media/page" + n + ".png", png);
-        // The picture fills the slide, keeping its shape (centred when the pages differ in size).
-        double k = std::min(double(cx) / std::max(1, slides[i].w), double(cy) / std::max(1, slides[i].h));
-        long long w = (long long)(slides[i].w * k), h = (long long)(slides[i].h * k);
+        // The page fills the slide, keeping its shape (centred when the pages differ in size): k is EMUs per
+        // point of the page, s points on the slide per point of the page.
+        double k = std::min(double(cx) / std::max(1.0, pg.w), double(cy) / std::max(1.0, pg.h)), s = k / 12700;
+        long long w = (long long)(pg.w * k), h = (long long)(pg.h * k);
         long long x = (cx - w) / 2, y = (cy - h) / 2;
+        auto emu = [](double v) { return std::to_string(std::llround(v)); };
+        std::string shapes, picRel;
+        if (!pg.drawing.empty()) {
+            // The drawing behind, locked: clicking the slide picks the text, not the picture.
+            ok = ok && z.Add("ppt/media/page" + n + ".png", pg.drawing);
+            picRel = "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"../media/page" + n + ".png\"/>";
+            shapes += "<p:pic><p:nvPicPr><p:cNvPr id=\"2\" name=\"Page " + n + "\"/><p:cNvPicPr><a:picLocks noGrp=\"1\" noSelect=\"1\" noMove=\"1\" noResize=\"1\" noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>"
+                      "<p:blipFill><a:blip r:embed=\"rId2\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>"
+                      "<p:spPr><a:xfrm><a:off x=\"" + emu(x) + "\" y=\"" + emu(y) + "\"/><a:ext cx=\"" + emu(w) + "\" cy=\"" + emu(h) +
+                      "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>";
+        }
+        // Each piece of text in a box of its own, where it was: no wrapping, no padding, one line as high as on the page.
+        int id = 3;
+        for (auto& t : pg.texts) {
+            std::string sid = std::to_string(id++);
+            shapes += "<p:sp><p:nvSpPr><p:cNvPr id=\"" + sid + "\" name=\"Text " + sid + "\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr>"
+                      "<p:spPr><a:xfrm><a:off x=\"" + emu(x + t.x * k) + "\" y=\"" + emu(y + t.y * k) + "\"/><a:ext cx=\"" + emu(std::max(1.0, t.w) * k) + "\" cy=\"" +
+                      emu(std::max(1.0, t.h) * k) + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>"
+                      "<p:txBody><a:bodyPr wrap=\"none\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\" anchor=\"t\"><a:noAutofit/></a:bodyPr><a:lstStyle/>"
+                      "<a:p><a:pPr><a:lnSpc><a:spcPts val=\"" + std::to_string(std::max(100L, std::lround(t.h * s * 100))) + "\"/></a:lnSpc>"
+                      "<a:spcBef><a:spcPts val=\"0\"/></a:spcBef><a:spcAft><a:spcPts val=\"0\"/></a:spcAft></a:pPr>";
+            for (auto& p : t.pieces) {
+                std::string font = XmlEscape(p.font.empty() ? L"Arial" : p.font);
+                char color[8];
+                snprintf(color, sizeof color, "%06X", unsigned(p.color & 0xFFFFFF));
+                long spacing = std::lround(t.spacing * s * 100);   // hundredths of a point
+                shapes += "<a:r><a:rPr lang=\"en-US\" sz=\"" + std::to_string(std::max(100L, std::lround(p.size * s * 100))) + "\"" + (p.bold ? " b=\"1\"" : "") +
+                          (p.italic ? " i=\"1\"" : "") + (spacing ? " spc=\"" + std::to_string(spacing) + "\"" : "") + " dirty=\"0\"><a:solidFill><a:srgbClr val=\"" + color +
+                          "\"/></a:solidFill><a:latin typeface=\"" + font + "\"/><a:cs typeface=\"" + font + "\"/></a:rPr><a:t>" + XmlEscape(p.text) + "</a:t></a:r>";
+            }
+            shapes += "</a:p></p:txBody></p:sp>";
+        }
         std::string slide = pre + "<p:sld " + kPptNs + "><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>"
-            "<p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>"
-            "<p:pic><p:nvPicPr><p:cNvPr id=\"2\" name=\"Page " + n + "\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>"
-            "<p:blipFill><a:blip r:embed=\"rId2\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>"
-            "<p:spPr><a:xfrm><a:off x=\"" + std::to_string(x) + "\" y=\"" + std::to_string(y) + "\"/><a:ext cx=\"" + std::to_string(w) + "\" cy=\"" + std::to_string(h) +
-            "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>";
+            "<p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>" +
+            shapes + "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>";
         std::string rels = pre + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
-            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout\" Target=\"../slideLayouts/slideLayout1.xml\"/>"
-            "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"../media/page" + n + ".png\"/></Relationships>";
+            "<Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout\" Target=\"../slideLayouts/slideLayout1.xml\"/>" +
+            picRel + "</Relationships>";
         ok = ok && z.Add("ppt/slides/slide" + n + ".xml", slide) && z.Add("ppt/slides/_rels/slide" + n + ".xml.rels", rels);
         types += "<Override PartName=\"/ppt/slides/slide" + n + ".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slide+xml\"/>";
         presRels += "<Relationship Id=\"rId" + std::to_string(i + 10) + "\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide\" Target=\"slides/slide" + n + ".xml\"/>";

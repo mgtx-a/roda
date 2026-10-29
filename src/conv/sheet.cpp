@@ -617,31 +617,41 @@ bool WritePageSheets(const std::vector<PageSheet>& pages, std::vector<uint8_t>& 
         for (auto& [at, e] : pg.borders) cells[at].edge = e;
         for (auto& [at, f] : pg.fills) { cells[at].fill = f; cells[at].filled = true; }
 
-        // Merged cells. Text that spans rows gets them, as far across as it reaches. Excel never lets a
-        // number spill into the next cell (it shows ####), so each number also gets the free room beside
-        // it: to its left when it is right-aligned, else to its right, up to the next line drawn or piece
-        // of text. Nothing is merged over another piece of text.
+        // Room for each piece of text, claimed cell by cell so no two overlap (Excel refuses a workbook whose
+        // merged areas overlap, and text can't spill into a cell someone else holds). Text goes first: it
+        // spills into the cells it reaches, or, spanning rows, is merged that far. Numbers then: Excel never
+        // lets a number spill (it shows ####), so each is merged over its own width plus the free room
+        // beside it, left of it when it's right-aligned, up to the next line drawn. A number with no room
+        // for its own width is written as text, which can spill.
         std::map<std::pair<size_t, size_t>, std::pair<size_t, size_t>> mergedTo;   // a cell -> the last row and column it covers
-        auto isNumber = [&](const PageSheet::Text& t) { std::string f; return t.pieces.size() == 1 && number(t.pieces[0].text, f).t == Cell::Num; };
-        auto empty = [&](const PageSheet::Text& t, size_t r0, size_t r1, size_t c) {
-            for (size_t r = r0; r <= r1; r++) { auto it = cells.find({ r, c }); if (it != cells.end() && it->second.text && it->second.text != &t) return false; }
-            return true;
-        };
+        std::set<const PageSheet::Text*> numbers, numbersAsText;
+        for (auto& t : pg.texts) { std::string f; if (t.pieces.size() == 1 && number(t.pieces[0].text, f).t == Cell::Num) numbers.insert(&t); }
+        std::set<std::pair<size_t, size_t>> taken;
+        for (auto& t : pg.texts) taken.insert({ t.row, t.col });
         auto wall = [&](size_t r, size_t c) {   // a line drawn between columns c - 1 and c
             auto a = pg.borders.find({ r, c }), b = pg.borders.find({ r, c - 1 });
             return (a != pg.borders.end() && (a->second.sides & 1)) || (b != pg.borders.end() && (b->second.sides & 2));
         };
-        for (auto& t : pg.texts) {
+        auto claim = [&](const PageSheet::Text& t, bool numbersNow) {
+            auto free = [&](size_t r0, size_t r1, size_t c) {
+                for (size_t r = r0; r <= r1; r++) if (!(r == t.row && c == t.col) && taken.count({ r, c })) return false;
+                return true;
+            };
             size_t a = t.col, b = t.col, rows = t.rowEnd;
-            for (size_t c = t.col; c <= t.colEnd && rows > t.row; c++) if (!empty(t, t.row, rows, c)) rows = t.row;   // in the way: one row
-            while (b < t.colEnd && empty(t, t.row, rows, b + 1)) b++;
-            if (isNumber(t)) {
-                if (t.right) while (a > 0 && empty(t, t.row, rows, a - 1) && !wall(t.row, a)) a--;
-                else while (b + 1 < pg.colW.size() && empty(t, t.row, rows, b + 1) && !wall(t.row, b + 1)) b++;
-            } else if (rows == t.row) b = t.col;   // one row: text spills over on its own
+            for (size_t c = t.col; c <= t.colEnd && rows > t.row; c++) if (!free(t.row, rows, c)) rows = t.row;   // in the way: one row
+            while (b < t.colEnd && free(t.row, rows, b + 1)) b++;
+            if (numbersNow) {
+                if (b < t.colEnd) { numbersAsText.insert(&t); b = t.col; }
+                else if (t.right) while (a > 0 && free(t.row, rows, a - 1) && !wall(t.row, a)) a--;
+                else while (b + 1 < pg.colW.size() && free(t.row, rows, b + 1) && !wall(t.row, b + 1)) b++;
+            }
+            for (size_t r = t.row; r <= rows; r++) for (size_t c = a; c <= b; c++) taken.insert({ r, c });
             if (a != t.col) { cells[{ t.row, t.col }].text = nullptr; cells[{ t.row, a }].text = &t; }
-            if (b > a || rows > t.row) mergedTo[{ t.row, a }] = { rows, b };
-        }
+            bool merged = rows > t.row || (numbersNow && !numbersAsText.count(&t) && b > a);   // one row of text spills on its own
+            if (merged) mergedTo[{ t.row, a }] = { rows, b };
+        };
+        for (auto& t : pg.texts) if (!numbers.count(&t)) claim(t, false);
+        for (auto& t : pg.texts) if (numbers.count(&t)) claim(t, true);
 
         std::string merges;
         size_t mergeCount = 0;
@@ -652,6 +662,12 @@ bool WritePageSheets(const std::vector<PageSheet>& pages, std::vector<uint8_t>& 
             std::string format, value, type;
             const PageSheet::Piece* font = o.text ? &o.text->pieces.front() : nullptr;
             bool right = false, left = false;
+            // Excel sets a line a little taller than the page did: a font that would overflow its row(s) is
+            // made just small enough to fit.
+            double room = 0;
+            auto spans = mergedTo.find(at);
+            for (size_t r = at.first; r <= (spans != mergedTo.end() ? spans->second.first : at.first) && r < pg.rowH.size(); r++) room += pg.rowH[r];
+            auto fit = [&](PageSheet::Piece p) { p.size = std::max(1.0, std::min(p.size, room / 1.2)); return p; };
             if (auto m = mergedTo.find(at); o.text && m != mergedTo.end()) {
                 merges += "<mergeCell ref=\"" + ref + ":" + ColumnName(m->second.second) + std::to_string(m->second.first + 1) + "\"/>";
                 mergeCount++;
@@ -659,7 +675,8 @@ bool WritePageSheets(const std::vector<PageSheet>& pages, std::vector<uint8_t>& 
             if (o.text) {
                 wstring plain;
                 for (auto& piece : o.text->pieces) plain += piece.text;
-                Cell c = o.text->pieces.size() == 1 ? number(plain, format) : Cell{};
+                Cell c = o.text->pieces.size() == 1 && !numbersAsText.count(o.text) ? number(plain, format) : Cell{};
+                right = numbersAsText.count(o.text) && o.text->right;
                 if (c.t == Cell::Num) {
                     value = "<v>" + Narrow(NumberText(c.n)) + "</v>";
                     right = o.text->right;
@@ -670,11 +687,13 @@ bool WritePageSheets(const std::vector<PageSheet>& pages, std::vector<uint8_t>& 
                     if (o.text->pieces.size() == 1) value = "<is><t xml:space=\"preserve\">" + XmlEscape(plain) + "</t></is>";
                     else {
                         value = "<is>";
-                        for (auto& piece : o.text->pieces) value += "<r><rPr>" + fontXml(piece, "rFont") + "</rPr><t xml:space=\"preserve\">" + XmlEscape(piece.text) + "</t></r>";
+                        for (auto& piece : o.text->pieces) value += "<r><rPr>" + fontXml(fit(piece), "rFont") + "</rPr><t xml:space=\"preserve\">" + XmlEscape(piece.text) + "</t></r>";
                         value += "</is>";
                     }
                 }
             }
+            PageSheet::Piece fitted;
+            if (font) { fitted = fit(*font); font = &fitted; }
             size_t fontId = font ? id(fonts, "<font>" + fontXml(*font, "name") + "</font>") : 0;
             size_t fillId = o.filled ? id(fills, "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"" + hex(o.fill) + "\"/><bgColor indexed=\"64\"/></patternFill></fill>") : 0;
             size_t borderId = 0;

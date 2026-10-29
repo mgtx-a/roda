@@ -75,15 +75,15 @@ void CharStyle(const Pdfium* p, FPDF_TEXTPAGE tp, int i, bool& bold, bool& itali
     *family = Widen(name);
 }
 
-/// A character's font size as the page shows it. PDFium gives the font's own size, before the text is
-/// stretched (some PDFs draw all text at size 1 and stretch it to 7): then the letter's height says it.
+/// A character's font size as the page shows it. PDFium's own figure is the size before the text is scaled
+/// (some PDFs draw all text at size 1 and stretch it to 7, others at 18 shrunk to 12): times the character's
+/// own vertical scale, it is the size seen.
 double ShownSize(const Pdfium* p, FPDF_TEXTPAGE tp, int i)
 {
     double size = p->FPDFText_GetFontSize(tp, i);
-    FS_RECTF box{};
-    if (!p->FPDFText_GetLooseCharBox(tp, i, &box)) return std::max(1.0, size);
-    double fromBox = (box.top - box.bottom) / 1.12;   // ascent and descent: about 1.12 sizes in common fonts
-    return fromBox > 0 && (size < fromBox * 0.6 || size > fromBox * 1.6) ? fromBox : std::max(1.0, size);
+    FS_MATRIX m{};
+    if (p->FPDFText_GetMatrix(tp, i, &m)) size *= std::hypot(m.c, m.d);
+    return std::max(1.0, size);   // Excel refuses fonts under 1
 }
 
 /// True for the second copy of a character drawn twice in the same place (some web pages print every
@@ -398,6 +398,7 @@ struct Glyph {
     wstring c, font;
     bool bold = false, italic = false;
     uint32_t color = 0;
+    bool ink = false;   // its box is only its ink (a CAD stroke font, without the usual measurements)
 };
 
 /// A straight line drawn on the page (y down), or a shaded box.
@@ -426,8 +427,67 @@ size_t Nearest(const std::vector<double>& edges, double x)
     return k + 1 < edges.size() && edges[k + 1] - x < x - edges[k] ? k + 1 : k;
 }
 
+/// Measures text the way Word will set it, so each line can be spaced to the width it had on the page:
+/// a PDF's font is often not on this PC, and Word's stand-in is wider or narrower. A font the PC lacks
+/// is swapped for Arial (or Times New Roman for a serif one), here and in the document alike.
+class TextMeasure {
+public:
+    TextMeasure()
+    {
+        if (SUCCEEDED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(dw_.Put()))))
+            dw_->GetSystemFontCollection(fonts_.Put());
+    }
+    /// The font Word will use for `family`. PDFs drop the spaces from names ("SegoeUI", "CenturyGothic"):
+    /// the name with spaces put back is tried too.
+    wstring Usable(const wstring& family)
+    {
+        auto it = usable_.find(family);
+        if (it != usable_.end()) return it->second;
+        wstring spaced;
+        for (size_t i = 0; i < family.size(); i++) {
+            wchar_t c = family[i], before = i ? family[i - 1] : L' ', after = i + 1 < family.size() ? family[i + 1] : L' ';
+            if (i && iswupper(c) && (iswlower(before) || (iswupper(before) && iswlower(after)))) spaced += L' ';
+            spaced += c;
+        }
+        for (const wstring& name : { family, spaced }) {
+            UINT32 index = 0;
+            BOOL exists = FALSE;
+            if (fonts_ && SUCCEEDED(fonts_->FindFamilyName(name.c_str(), &index, &exists)) && exists) return usable_[family] = name;
+        }
+        wstring f = family;
+        for (auto& c : f) c = towlower(c);
+        bool mono = f.find(L"mono") != wstring::npos || f.find(L"courier") != wstring::npos || f.find(L"code") != wstring::npos ||
+                    f.find(L"consol") != wstring::npos || f.find(L"typewriter") != wstring::npos;
+        bool serif = f.find(L"times") != wstring::npos || f.find(L"georgia") != wstring::npos || f.find(L"garamond") != wstring::npos ||
+                     (f.find(L"serif") != wstring::npos && f.find(L"sans") == wstring::npos);
+        return usable_[family] = mono ? L"Consolas" : serif ? L"Times New Roman" : L"Arial";
+    }
+    /// Width in points as set in `p`'s font and size, or -1 when it can't be measured.
+    double Width(const PageSheet::Piece& p)
+    {
+        Com<IDWriteTextFormat> format;
+        Com<IDWriteTextLayout> layout;
+        DWRITE_TEXT_METRICS m{};
+        if (!fonts_ || FAILED(dw_->CreateTextFormat(p.font.c_str(), fonts_.Get(), p.bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+                                                     p.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+                                                     float(p.size), L"", format.Put())) ||
+            FAILED(dw_->CreateTextLayout(p.text.c_str(), UINT32(p.text.size()), format.Get(), 1e6f, 1e6f, layout.Put())) || FAILED(layout->GetMetrics(&m)))
+            return -1;
+        return m.widthIncludingTrailingWhitespace;
+    }
+private:
+    Com<IDWriteFactory> dw_;
+    Com<IDWriteFontCollection> fonts_;
+    std::map<wstring, wstring> usable_;
+};
+
 /// A piece of text on the page: where (points, y down) and its parts, each in its own style.
-struct Run { double l, r, t, b; wstring text; std::vector<PageSheet::Piece> pieces; };
+struct Run {
+    double l, r, t, b;
+    wstring text;
+    std::vector<PageSheet::Piece> pieces;
+    double capSize = 0, baseline = 0;   // ink-only fonts: the size of its capitals, and where they stand
+};
 
 /// What a page holds, read once: its size, its pieces of text, the lines and boxes drawn, its pictures.
 struct PageContent {
@@ -464,6 +524,8 @@ PageContent ReadPage(const Pdfium* p, FPDF_PAGE page)
             Glyph g;
             g.l = across(box.left); g.r = across(box.right); g.t = down(box.top); g.b = down(box.bottom);
             g.size = ShownSize(p, tp, i);
+            double il = 0, ir = 0, ib = 0, it = 0;
+            g.ink = p->FPDFText_GetCharBox(tp, i, &il, &ir, &ib, &it) && std::fabs(it - box.top) < 0.05 && std::fabs(ib - box.bottom) < 0.05;
             if (u >= 0x10000) { u -= 0x10000; g.c += wchar_t(0xD800 + (u >> 10)); g.c += wchar_t(0xDC00 + (u & 0x3FF)); }
             else g.c = wchar_t(u);
             CharStyle(p, tp, i, g.bold, g.italic, &g.font);
@@ -546,14 +608,24 @@ PageContent ReadPage(const Pdfium* p, FPDF_PAGE page)
             double gap = i ? g.l - line[i - 1].r : 1e9;
             if (gap > g.size * 0.9 || ruleBetween(line[i - 1].r - 0.5, g.l + 0.5, g.t, g.b)) runs.push_back({ g.l, g.r, g.t, g.b, L"", {} });
             Run& run = runs.back();
-            wstring add = (!run.text.empty() && gap > g.size * 0.12 ? L" " : L"") + g.c;
+            // A gap wider than a sliver is a space; boxes that are only ink (no room either side of the
+            // letter) leave wider gaps between letters, so there a space must be wider too.
+            wstring add = (!run.text.empty() && gap > g.size * (g.ink ? 0.25 : 0.12) ? L" " : L"") + g.c;
             run.text += add;
             run.r = std::max(run.r, g.r); run.t = std::min(run.t, g.t); run.b = std::max(run.b, g.b);
+            if (g.ink && (iswupper(g.c[0]) || iswdigit(g.c[0]))) { run.capSize = std::max(run.capSize, g.size); run.baseline = std::max(run.baseline, g.b); }
             auto& ps = run.pieces;
             if (!ps.empty() && ps.back().font == g.font && ps.back().bold == g.bold && ps.back().italic == g.italic && ps.back().color == g.color &&
                 std::fabs(ps.back().size - g.size) < 0.3) ps.back().text += add;
             else ps.push_back({ add, g.font, g.size, g.bold, g.italic, g.color });
         }
+    }
+    // An ink-only font's line is as high as a line of its size takes from where the capitals stand, not
+    // just the height of the ink.
+    for (auto& run : runs) {
+        if (run.capSize <= 0) continue;
+        run.t = std::min(run.t, run.baseline - 0.905 * run.capSize);
+        run.b = std::max(run.b, run.baseline + 0.212 * run.capSize);
     }
     pc.w = std::max(1.0, double(R - L));
     pc.h = std::max(1.0, double(T - B));
@@ -589,6 +661,10 @@ PageSheet PageLayout(PageContent pc)
     }
     xs = Edges(xs, tolX);
     ys = Edges(ys, tolY);
+    // Excel's rows are at most 409 points high and its columns 255 characters (about 1,300 points) wide:
+    // a bigger gap (a large picture, an empty half page, a poster) gets more rows or columns.
+    for (size_t i = 0; i < ys.size(); i++) if ((i + 1 < ys.size() ? ys[i + 1] : pageH) - ys[i] > 400) ys.insert(ys.begin() + long(i) + 1, ys[i] + 400);
+    for (size_t i = 0; i < xs.size(); i++) if ((i + 1 < xs.size() ? xs[i + 1] : pageW) - xs[i] > 1300) xs.insert(xs.begin() + long(i) + 1, xs[i] + 1300);
     for (size_t i = 0; i < xs.size(); i++) sheet.colW.push_back(std::max(0.5, (i + 1 < xs.size() ? xs[i + 1] : std::max(pageW, xs[i] + 8)) - xs[i]));
     for (size_t i = 0; i < ys.size(); i++) sheet.rowH.push_back(std::max(0.75, (i + 1 < ys.size() ? ys[i + 1] : std::max(pageH, ys[i] + 8)) - ys[i]));
 
@@ -614,8 +690,9 @@ PageSheet PageLayout(PageContent pc)
         };
         t.right = numeric(run.text) && (lineNear(run.r, 8) || !lineNear(run.l, 4));
         t.rowEnd = std::max(row, Slot(ys, run.b - tolY - 0.01, 0));
-        // Text that spans rows can't spill sideways in Excel: its cell reaches as far as the text does.
-        t.colEnd = t.right ? std::max(col, Slot(xs, run.r - tolX - 0.01, 0)) : t.rowEnd > row ? std::max(col, Slot(xs, run.r, 0)) : col;
+        // The columns the text covers: a right-aligned number ends on the edge at its right; anything else
+        // reaches into the column its end is in.
+        t.colEnd = t.right ? std::max(col, Slot(xs, run.r - tolX - 0.01, 0)) : std::max(col, Slot(xs, run.r, 0));
         t.pieces = std::move(run.pieces);
         sheet.texts.push_back(std::move(t));
     }
@@ -1068,14 +1145,17 @@ bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& 
         return f.End(r);
     }
     if (target == L"xlsx") {
-        // Every page as a sheet laid out like it.
+        // Every page as a sheet laid out like it, in fonts this PC has.
         std::vector<PageSheet> sheets;
+        TextMeasure measure;
         bool text = false;
         for (int i = 0; i < pages; i++) {
             FPDF_PAGE page = pdf.api()->FPDF_LoadPage(pdf.get(), i);
             if (!page) continue;
             sheets.push_back(PageLayout(ReadPage(pdf.api(), page)));
             pdf.api()->FPDF_ClosePage(page);
+            for (auto& t : sheets.back().texts)
+                for (auto& piece : t.pieces) piece.font = measure.Usable(piece.font.empty() ? L"Arial" : piece.font);
             text = text || !sheets.back().texts.empty();
             p.Set(0.9 * (i + 1) / pages);
         }
@@ -1084,32 +1164,41 @@ bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& 
         if (!WritePageSheets(sheets, out)) { r.error = L"Could not write the workbook."; return false; }
         return WriteOutput(job, in, base, L".xlsx", out, p, r);
     }
-    if (target == L"pptx") {
-        std::vector<Image> slides;
-        for (int i = 0; i < pages; i++) {
-            Image img;
-            if (!RenderPage(pdf, i, 150, img, r.error, 2400)) return false;
-            slides.push_back(std::move(img));
-            p.Set(0.8 * (i + 1) / pages);
-        }
-        std::vector<uint8_t> out;
-        if (!WritePptx(slides, out, r.error)) return false;
-        return WriteOutput(job, in, base, L".pptx", out, p, r);
-    }
-    if (target == L"docx") {
-        // Every page laid out like it: its drawing behind, its text typed over it where it was.
+    if (target == L"docx" || target == L"pptx") {
+        // Every page laid out like it: its drawing behind, its text typed over it where it was, in Word
+        // on pages of the PDF's size, in PowerPoint on slides.
         std::vector<LaidPage> laid;
+        TextMeasure measure;
         for (int i = 0; i < pages; i++) {
             FPDF_PAGE page = pdf.api()->FPDF_LoadPage(pdf.get(), i);
             if (!page) continue;
             PageContent pc = ReadPage(pdf.api(), page);
             pdf.api()->FPDF_ClosePage(page);
+            // Word's pages are at most 22 inches a side: a bigger page (a poster, a map) is scaled down to fit.
+            double k = std::min(1.0, 1584 / std::max(pc.w, pc.h));
             LaidPage lp;
-            lp.w = pc.w;
-            lp.h = pc.h;
-            for (auto& run : pc.runs) lp.texts.push_back({ run.l, run.t, run.b - run.t, std::move(run.pieces) });
+            lp.w = pc.w * k;
+            lp.h = pc.h * k;
+            for (auto& run : pc.runs) {
+                // Each line as wide as it was: the space it lacks (or has too much of) spread over its letters.
+                double width = 0;
+                size_t letters = 0;
+                for (auto& piece : run.pieces) {
+                    piece.size = std::round(piece.size * k * 2) / 2;   // Word sets half points
+                    piece.font = measure.Usable(piece.font.empty() ? L"Arial" : piece.font);
+                    double w = measure.Width(piece);
+                    width = w < 0 || width < 0 ? -1 : width + w;
+                    letters += piece.text.size();
+                }
+                double spacing = 0, stretch = 1, size = run.pieces.empty() ? 1 : run.pieces.front().size, wanted = (run.r - run.l) * k;
+                if (width > 0 && letters > 1) spacing = std::clamp((wanted - width) / double(letters), -size * 0.3, size * 0.6);
+                // Text far wider than the font sets it (stretched lettering) has its letters stretched in Word,
+                // not spaced out; PowerPoint can't, and keeps the spacing.
+                if (width > 0 && wanted / width > 1.25) stretch = std::min(2.0, wanted / width);
+                lp.texts.push_back({ run.l * k, run.t * k, (run.b - run.t) * k, spacing, std::move(run.pieces), wanted, stretch });
+            }
             Image img;
-            if (!RenderPage(pdf, i, 200, img, r.error, 0, false)) return false;
+            if (!RenderPage(pdf, i, 200 * k, img, r.error, 0, false)) return false;
             // The paper is see-through, the drawing on it isn't: in Word's dark mode the page darkens and the
             // text turns light, but a picture keeps its colours, so white paper would hide the text.
             // White becomes clear and the edges of lines fade into it (white taken out, not cut out).
@@ -1127,8 +1216,10 @@ bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& 
             p.Set(0.9 * (i + 1) / pages);
         }
         std::vector<uint8_t> out;
-        if (!WriteLaidDocx(laid, BaseName(in), out)) { r.error = L"Could not write the Word document."; return false; }
-        return WriteOutput(job, in, base, L".docx", out, p, r);
+        if (target == L"pptx") {
+            if (!WritePptx(laid, out, r.error)) return false;
+        } else if (!WriteLaidDocx(laid, BaseName(in), out)) { r.error = L"Could not write the Word document."; return false; }
+        return WriteOutput(job, in, base, L"." + target, out, p, r);
     }
     Doc doc;
     bool images = target == L"epub";

@@ -37,7 +37,7 @@ namespace rd {
     X(FORM_OnLButtonDown) X(FORM_OnLButtonUp) X(FPDF_FFLDraw) X(FPDFText_LoadStandardFont) X(FPDFPageObj_CreateTextObj) X(FPDFText_SetText) X(FPDFFont_Close) \
     X(FPDFText_GetFillColor) X(FPDFPageObj_GetBounds) X(FPDFPageObj_GetMatrix) X(FPDFPageObj_GetFillColor) X(FPDFPageObj_GetStrokeColor) \
     X(FPDFPath_GetDrawMode) X(FPDFPath_CountSegments) X(FPDFText_GetTextObject) X(FPDFTextObj_GetTextRenderMode) \
-    X(FPDFPage_RemoveObject) X(FPDFFormObj_RemoveObject) X(FPDFPageObj_Destroy)
+    X(FPDFPage_RemoveObject) X(FPDFFormObj_RemoveObject) X(FPDFPageObj_Destroy) X(FPDFText_GetMatrix)
 
 struct Pdfium {
 #define RD_PDFIUM_MEMBER(name) decltype(&::name) name = nullptr;

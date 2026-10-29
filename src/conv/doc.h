@@ -57,13 +57,15 @@ bool WriteEpub(const Doc& doc, std::vector<uint8_t>& out);
 /// and each piece of text typed over it where it was. Points, y down from the page's top.
 struct LaidPage {
     double w = 595, h = 842;
-    struct Text { double x = 0, y = 0, h = 0; std::vector<PageSheet::Piece> pieces; };
+    // spacing: points after each letter; stretch: letters this many times their width, instead of the spacing (Word only)
+    struct Text { double x = 0, y = 0, h = 0, spacing = 0; std::vector<PageSheet::Piece> pieces; double w = 0, stretch = 1; };
     std::vector<Text> texts;
     std::vector<uint8_t> drawing;   // PNG of the page without its text; empty when nothing else is on it
 };
 bool WriteLaidDocx(const std::vector<LaidPage>& pages, const wstring& title, std::vector<uint8_t>& out);
-/// A presentation with one slide per picture, each filling the slide (PDF pages as slides).
-bool WritePptx(const std::vector<Image>& slides, std::vector<uint8_t>& out, wstring& err);
+/// A presentation with a slide per page, laid out like it: the page's drawing behind (locked), its text
+/// in text boxes over it where it was.
+bool WritePptx(const std::vector<LaidPage>& pages, std::vector<uint8_t>& out, wstring& err);
 
 /// XML text escaping.
 std::string XmlEscape(const wstring& s);
