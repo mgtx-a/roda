@@ -179,6 +179,7 @@ struct App {
         // First run: the tour, once things have settled.
         if (!settings.welcomed && !TestMode()) After(1.5, [this] { StartTour(); });
         wheel.onChoose = [this](const WheelOption& o, const std::vector<wstring>& paths, POINT at) { Chosen(o, paths, at); };
+        wheel.onMore = [this](const std::vector<WheelOption>& rest, const std::vector<wstring>& paths, POINT at) { ChooseMore(rest, paths, at); };
         jobs.onChange = [this](const JobState& s) {
             if (!s.quiet) {
                 cards.Update(s);
@@ -353,6 +354,25 @@ struct App {
         });
     }
 
+    /// More… on the wheel: the rest of the choices as a list where the wheel was.
+    void ChooseMore(const std::vector<WheelOption>& rest, const std::vector<wstring>& paths, POINT at)
+    {
+        if (rest.empty()) return;
+        HMENU m = CreatePopupMenu();
+        for (size_t i = 0; i < rest.size(); i++) {
+            wstring label = rest[i].label;
+            for (size_t k = 0; (k = label.find(L'&', k)) != wstring::npos; k += 2) label.insert(k, 1, L'&');
+            AppendMenuW(m, MF_STRING, UINT_PTR(i + 1), label.c_str());
+        }
+        BeginModal();
+        SetForegroundWindow(g_msg);   // so a click elsewhere closes the list
+        int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_NONOTIFY | TPM_CENTERALIGN | TPM_VCENTERALIGN, at.x, at.y, 0, g_msg, nullptr);
+        EndModal();
+        DestroyMenu(m);
+        if (cmd > 0 && size_t(cmd) <= rest.size()) Chosen(rest[size_t(cmd - 1)], paths, at);
+        else Log(L"wheel: More… closed, nothing chosen");
+    }
+
     void StartTour()
     {
         tour.Start([this] { return wheel.opens(); }, [this] { return choices; });
@@ -419,6 +439,7 @@ struct App {
         else if (c->popup == Popup::Order) {
             std::vector<wstring> names;
             for (auto& p : paths) names.push_back(FileName(p));
+            popup.whereFor = [this, paths](size_t first) { return WhereText({ paths[first] }, true); };
             popup.ShowOrder(L"Merge " + std::to_wstring(paths.size()) + L" files into one PDF", names, at);
         }
         else if (c->popup == Popup::Crop) {

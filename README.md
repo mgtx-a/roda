@@ -33,7 +33,8 @@ Until the first release, test builds are on the repository's **Actions** tab.
    drag onto a name to switch to that wheel.
 4. Let go of the mouse on the choice you want. Some choices, like **Resize…**, **Crop** or **Trim**,
    then open a small panel to finish. It shows where the result will be saved.
-   **Resize…** has the usual sizes (50%, 1920 px, 1080 px; 1080p, 720p, 480p for videos) as one click.
+   **Resize…** has the usual sizes (50%, 1920 px, 1080 px; 1080p, 720p, 480p for videos) as one click,
+   or pick one with **Tab** or the arrows and press **Enter**.
 5. A small card in the bottom-right corner shows the progress. When it's done, click **Open** or
    **Show in folder**. Missed it? Right-click the wheel icon near the clock and look in **Recent**: your
    last 10 results are there, with **Open**, **Show in folder**, and why something failed.
@@ -70,6 +71,8 @@ next to the first file.
 ### Tips
 - Press **Space** **after** you start dragging, not before.
 - The wheel only shows choices that work for the files you're dragging.
+- A wheel has at most 8 choices. When there are more, the last one is **More…**: drop on it for a list
+  of the rest.
 - The wheel won't pop up while a game or full-screen video is in front.
 
 ## What it can do

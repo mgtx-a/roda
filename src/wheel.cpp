@@ -178,6 +178,13 @@ bool Wheel::Build()
     auto opts = OptionsFor(kind_, kinds_, settings_);
     if (opts.empty()) return false;
     segs_.clear();
+    // One ring, always in the same places: past 8 choices, the 8th is More…, a list of the rest after the drop.
+    more_.clear();
+    if (int(opts.size()) > kPerRing) {
+        more_.assign(opts.begin() + (kPerRing - 1), opts.end());
+        opts.resize(kPerRing - 1);
+        opts.push_back({ nullptr, L"More…", L"", Icon::None });
+    }
     int n = int(opts.size());
     int inner = std::min(n, kPerRing), outer = n - inner;
     for (int i = 0; i < n; i++) {
@@ -365,6 +372,7 @@ void Wheel::Choose(int h)
     WheelOption opt = segs_[size_t(h)].opt;
     auto paths = paths_;
     POINT at = centre_;
+    auto rest = more_;
     if (ReducedMotion()) Hide(false);
     else {
         // The chosen segment pulses, then the wheel shrinks away.
@@ -375,6 +383,7 @@ void Wheel::Choose(int h)
     }
     // Run it after the drop has returned: the drag source (Explorer) waits inside DoDragDrop until then,
     // and a folder picker or a popup must not keep it frozen.
+    if (!opt.conv) { if (onMore) After(0, [this, rest, paths, at] { if (onMore) onMore(rest, paths, at); }); return; }   // More…
     if (onChoose) After(0, [this, opt, paths, at] { if (onChoose) onChoose(opt, paths, at); });
 }
 

@@ -44,6 +44,8 @@ public:
 
     /// An option was chosen, by a drop or by the keyboard.
     std::function<void(const WheelOption& option, const std::vector<wstring>& paths, POINT at)> onChoose;
+    /// More… was chosen: the choices that didn't fit, to offer as a list.
+    std::function<void(const std::vector<WheelOption>& rest, const std::vector<wstring>& paths, POINT at)> onMore;
 
 private:
     struct Segment {
@@ -72,6 +74,7 @@ private:
     std::vector<wstring> paths_;
     std::vector<Kind> kinds_;
     std::vector<Segment> segs_;
+    std::vector<WheelOption> more_;  // the choices behind More…
     int hot_ = -2;
     bool avail_[3]{};               // Convert, Tools, Files: has something for these files
     D2D1_RECT_F tabs_[3]{};         // the tabs, DIPs from the centre

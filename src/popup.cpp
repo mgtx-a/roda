@@ -60,6 +60,7 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
     surf_.SetScale(scale_);
     whereH_ = where_.empty() ? 0 : 22;
     hoverPreset_ = -1;
+    presetSel_ = kind == Popup::Size && !sizeFields_ ? 0 : -1;   // only sizes: the first has the keys
     // The main button grows to fit its words ("Resize 3 pictures").
     applyW_ = std::max(kBtnW, double(surf_.MeasureText(apply_.empty() ? L"Compress" : apply_.c_str(), 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) + 28);
     if (kind != Popup::Size) sizeFields_ = true;
@@ -78,7 +79,7 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
         h_ = kListTop + names_.size() * RowH() + 10 + kBtnH + 16 + whereH_;
     } else if (kind == Popup::Size && !sizeFields_) {
         w_ = 320;
-        h_ = 46 + 30 + 16 + kBtnH + 16 + whereH_;
+        h_ = 46 + 30 + 36 + kBtnH + 16 + whereH_;   // room for the keys' hint under the sizes
     } else {
         w_ = 320;
         h_ = 172 + (kind == Popup::Size ? FieldsTop() : 0) + whereH_;
@@ -148,6 +149,7 @@ void OptionsPopup::Hide()
     sizeFields_ = true;
     apply_.clear();
     where_.clear();
+    whereFor = nullptr;
     ShowWindow(hwnd_, SW_HIDE);
     surf_.Release();
     pic_ = {};
@@ -263,6 +265,15 @@ void OptionsPopup::Drag(double x, double y)
     cx_ = l; cy_ = t; cw_ = r - l; ch_ = b - t;
 }
 
+/// A size from the row: done in one go, by that size's own tool.
+void OptionsPopup::ApplyPreset(int i)
+{
+    Json opts = Json::Object().Set(L"op", presets_[size_t(i)].op);
+    auto fn = onApply;
+    Hide();
+    if (fn) fn(opts);
+}
+
 void OptionsPopup::Apply()
 {
     Json opts = Json::Object();
@@ -309,16 +320,9 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             auto [x, y] = local(l);
             int a = -1;
             Part p = HitTest(x, y, &a);
-            if (p == Part::Width || p == Part::Height) { field_ = p == Part::Width ? 0 : 1; dirty_ = true; RequestFrame(); return 0; }
+            if (p == Part::Width || p == Part::Height) { field_ = p == Part::Width ? 0 : 1; presetSel_ = -1; dirty_ = true; RequestFrame(); return 0; }
             if (p == Part::Aspect) { SetAspect(a); dirty_ = true; RequestFrame(); return 0; }
-            if (p == Part::Preset) {
-                // A size from the row: done in one click, by that size's own tool.
-                Json opts = Json::Object().Set(L"op", presets_[size_t(a)].op);
-                auto fn = onApply;
-                Hide();
-                if (fn) fn(opts);
-                return 0;
-            }
+            if (p == Part::Preset) { ApplyPreset(a); return 0; }
             if (p == Part::Row) selected_ = a;
             if (p == Part::Slider || p == Part::Row || (p >= Part::CropMove && p <= Part::CropSW)) {
                 drag_ = p;
@@ -383,7 +387,25 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 if (m == WM_SYSKEYDOWN || (GetKeyState(VK_CONTROL) & 0x8000)) MoveRow(to);
                 else selected_ = std::clamp(to, 0, int(order_.size()) - 1);
             }
-            if (w == VK_RETURN) { if (sizeFields_) Apply(); return 0; }
+            if (w == VK_RETURN) {
+                if (presetSel_ >= 0 && presetSel_ < int(presets_.size())) ApplyPreset(presetSel_);
+                else if (sizeFields_) Apply();
+                return 0;
+            }
+            if (kind_ == Popup::Size && !presets_.empty() && w == VK_TAB) {
+                // Tab walks the sizes, then the width and height fields (when there are any), then round again.
+                int n = int(presets_.size());
+                if (presetSel_ >= 0) { presetSel_++; if (presetSel_ >= n) presetSel_ = sizeFields_ ? -1 : 0; if (presetSel_ < 0) field_ = 0; }
+                else if (field_ == 0) field_ = 1;
+                else presetSel_ = 0;
+                dirty_ = true;
+                RequestFrame();
+                return 0;
+            }
+            if (kind_ == Popup::Size && presetSel_ >= 0 && (w == VK_LEFT || w == VK_RIGHT)) {
+                int n = int(presets_.size());
+                presetSel_ = (presetSel_ + (w == VK_RIGHT ? 1 : n - 1)) % n;
+            }
             if (kind_ == Popup::Quality && (w == VK_LEFT || w == VK_RIGHT)) {
                 int step = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 5;
                 quality_ = std::clamp(quality_ + (w == VK_RIGHT ? step : -step), 1, 100);
@@ -397,6 +419,7 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
         }
         case WM_CHAR:
             if (kind_ == Popup::Size && sizeFields_ && w >= L'0' && w <= L'9') {
+                if (presetSel_ >= 0) { presetSel_ = -1; field_ = 0; }   // typing a number means your own size
                 wstring& f = field_ ? height_ : width_;
                 if (f.size() < 5 && !(f.empty() && w == L'0')) f += wchar_t(w);
                 dirty_ = true;
@@ -454,6 +477,9 @@ void OptionsPopup::Draw()
         wstring w = Ellipsize(surf_, where_, 11, DWRITE_FONT_WEIGHT_NORMAL, W - 40);
         surf_.DrawText(w.c_str(), 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by - 22, W - 40, 16), th.dim);
     }
+    if (kind_ == Popup::Size && !sizeFields_) {
+        surf_.DrawText(L"Tab or arrows to pick, Enter to resize", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, T + 84, W - 40, 16), th.dim);
+    }
     if (kind_ == Popup::Size && !presets_.empty()) {
         presetX_.clear();
         float x = 20;
@@ -462,6 +488,8 @@ void OptionsPopup::Draw()
             presetX_.push_back({ x, pw });
             bool hot = hoverPreset_ == int(i);
             rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(L + x, T + 46, pw, 30), 8, 8), surf_.Solid(hot ? th.accent : WithAlpha(th.accent, 0.16)));
+            if (presetSel_ == int(i))   // the keys' choice: Enter applies it
+                rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(L + x + 0.75f, T + 46.75f, pw - 1.5f, 28.5f), 7.5f, 7.5f), surf_.Solid(th.accent), 2);
             surf_.DrawText(presets_[i].label.c_str(), 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(L + x + 14, T + 52.5f, pw, 18), hot ? th.accentText : th.accent);
             x += pw + 8;
         }
@@ -494,8 +522,9 @@ void OptionsPopup::Draw()
                 rt->DrawLine(D2D1::Point2F(x + 12 + cw + 1, Tf + 73), D2D1::Point2F(x + 12 + cw + 1, Tf + 89), surf_.Solid(th.text), 1);
             }
         };
-        field(L + 20, trim ? L"Start" : presets_.empty() ? L"Width" : L"Or your own width", width_, field_ == 0);
-        field(L + W - 20 - 124, trim ? L"End" : L"Height", height_, field_ == 1);
+        bool typing = presetSel_ < 0;
+        field(L + 20, trim ? L"Start" : presets_.empty() ? L"Width" : L"Or your own width", width_, typing && field_ == 0);
+        field(L + W - 20 - 124, trim ? L"End" : L"Height", height_, typing && field_ == 1);
         surf_.DrawText(trim ? L"–" : L"×", 14, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + W / 2 - 5, Tf + 71, 12, 20), th.dim);
         surf_.DrawText(trim ? L"Minutes:seconds, like 1:30" : L"Leave one on auto to keep the proportions", 11, DWRITE_FONT_WEIGHT_NORMAL,
                        RectF(L + 20, Tf + 104, W - 40, 16), th.dim);
@@ -509,6 +538,7 @@ void OptionsPopup::Draw()
         rt->DrawLine(D2D1::Point2F(L + 32 + cw + 1, T + 73), D2D1::Point2F(L + 32 + cw + 1, T + 89), surf_.Solid(th.text), 1);
         surf_.DrawText(L"Page numbers, like 2 or 5-7, with commas between", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, T + 104, fw, 16), th.dim);
     } else if (kind_ == Popup::Order) {
+        if (whereFor && !order_.empty()) where_ = whereFor(order_[0]);   // the first file decides the folder
         // The files top to bottom, in the order their pages will come: number, name, and a grip to drag by.
         float rh = float(RowH()), y0 = T + float(kListTop);
         for (size_t i = 0; i < order_.size(); i++) {

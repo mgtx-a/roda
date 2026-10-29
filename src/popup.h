@@ -22,6 +22,8 @@ public:
     void SetPresets(std::vector<Preset> presets, bool fields);
     /// Before Show: the main button's words ("Resize 3 pictures") and where results go. Cleared on Hide.
     void SetSummary(const wstring& apply, const wstring& where);
+    /// Merge: where the result goes when file `first` (an index into the names) comes first. Cleared on Hide.
+    std::function<wstring(size_t first)> whereFor;
     /// Merge: the files in a list to put in order; applies with "order", the new order as indexes ("2,0,1").
     void ShowOrder(const wstring& title, const std::vector<wstring>& names, POINT at);
     void Hide();
@@ -39,6 +41,7 @@ private:
     LRESULT Handle(UINT m, WPARAM w, LPARAM l);
     Part HitTest(double x, double y, int* aspect) const;
     void Apply();
+    void ApplyPreset(int i);
     void Drag(double x, double y);
     void SetAspect(int i);
     void MoveRow(int to);
@@ -72,6 +75,7 @@ private:
     wstring apply_, where_;
     double applyW_ = 92, whereH_ = 0;
     int hoverPreset_ = -1;
+    int presetSel_ = -1;                     // the size picked with Tab or the arrows; -1: the fields have the keys
     Part drag_ = Part::None, hover_ = Part::None;
     double dragX_ = 0, dragY_ = 0, startX_ = 0, startY_ = 0, startW_ = 0, startH_ = 0;
 };
