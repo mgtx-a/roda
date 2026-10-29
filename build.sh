@@ -4,6 +4,8 @@
 # Third-party code (third_party/) is compiled once per architecture into <out>/obj/<arch>/tp and reused.
 # PDFium is a prebuilt DLL (bblanchon/pdfium-binaries), downloaded once, checked against its SHA-256.
 # NO_PDFIUM=1 skips it (a Lite build: Roda then hides the PDF options).
+# FFmpeg (audio and video) is an LGPL build from BtbN/FFmpeg-Builds, used as ffmpeg.exe + its DLLs in
+# engines/ffmpeg, downloaded and checked the same way. NO_FFMPEG=1 skips it.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ZIG="${ZIG:-/d/native-build/toolchain/zig-x86_64-windows-0.17.0/zig.exe}"   # CI sets ZIG=zig
@@ -26,6 +28,10 @@ DEFS="-DLUNASVG_BUILD_STATIC -DPLUTOVG_BUILD_STATIC -DPUGIXML_NO_EXCEPTIONS -DPU
 PDFIUM_TAG="chromium/8100"
 PDFIUM_SHA_x64=51621bcc1d9be9ea448f4b84b0516862b928e3968d3fca899af1a6d6e2848d6d
 PDFIUM_SHA_arm64=cca9b28d406ae2a902b0b710a92ab699c4c2931564ab6efe44630014d492a9ca
+FFMPEG_TAG="autobuild-2026-09-30-13-08"
+FFMPEG_NAME="ffmpeg-n8.1.3-9-g29e619e767"
+FFMPEG_SHA_x64=3e47bda1607740550141e37c0e49d1e5182b34699f15adfd137ee266d346811a
+FFMPEG_SHA_arm64=7674d11915c95c8f65eeec36b329917c3023f6bae5786549cc47aed52cc1cea7
 
 tp_sources() {
   ls $WEBP/src/dec/*.c $WEBP/src/enc/*.c $WEBP/src/dsp/*.c $WEBP/src/utils/*.c $WEBP/sharpyuv/*.c \
@@ -67,6 +73,25 @@ pdfium() {
   cp "$cache/pdfium.dll" "$dest/engines/"
 }
 
+# ffmpeg <arch> <dest dir>: ffmpeg.exe, ffprobe.exe and the DLLs into dest/engines/ffmpeg.
+ffmpeg() {
+  [ -n "${NO_FFMPEG:-}" ] && return
+  local arch="$1" dest="$2" cache="$TP/ffmpeg-bin/$1"
+  local want; eval want=\$FFMPEG_SHA_$arch
+  local plat=win64; [ "$arch" = arm64 ] && plat=winarm64
+  if [ ! -f "$cache/ffmpeg.exe" ]; then
+    mkdir -p "$cache"
+    local zip="$cache/ffmpeg.zip" name="$FFMPEG_NAME-$plat-lgpl-shared-8.1"
+    curl -sSfL -o "$zip" "https://github.com/BtbN/FFmpeg-Builds/releases/download/$FFMPEG_TAG/$name.zip"
+    local got; got=$(sha256sum "$zip" | cut -d' ' -f1)
+    [ "$got" = "$want" ] || { echo "$name.zip: SHA-256 $got, expected $want"; rm -f "$zip"; exit 1; }
+    unzip -q -o "$zip" "$name/bin/*" "$name/LICENSE.txt" -d "$cache"
+    mv "$cache/$name/bin/"* "$cache/" && mv "$cache/$name/LICENSE.txt" "$cache/" && rm -rf "$cache/$name" "$zip" "$cache/ffplay.exe"
+  fi
+  mkdir -p "$dest/engines/ffmpeg"
+  cp "$cache"/*.exe "$cache"/*.dll "$cache/LICENSE.txt" "$dest/engines/ffmpeg/"
+}
+
 build() {   # build <name> <zig target>
   local name="$1" target="$2"
   local tpdir="$OUT/obj/$name/tp" srcdir="$OUT/obj/$name/src"
@@ -81,6 +106,7 @@ build() {   # build <name> <zig target>
     -ld2d1 -ldwrite -lwindowscodecs -lole32 -loleaut32 -lshell32 -lshlwapi -luser32 -lgdi32 -lwinmm -ladvapi32 -luuid -lpsapi -ldwmapi
   rm -f "$OUT/$name/Roda.pdb" "$OUT/$name/Roda.lib"
   pdfium "$name" "$OUT/$name"
+  ffmpeg "$name" "$OUT/$name"
   printf '%-6s %s KB  %s\n' "$name" "$(( $(stat -c %s "$OUT/$name/Roda.exe") / 1024 ))" "$OUT/$name/Roda.exe"
 }
 

@@ -15,6 +15,8 @@ bool RunPreview(const Job& job, const Progress& p, Result& r);     // "prep.prev
 bool RunConvert(const Job& job, const Progress& p, Result& r);     // every "to.*": picks the reader by the input's kind
 bool RunPdfTool(const Job& job, const Progress& p, Result& r);     // "pdf.split", "pdf.images", "pdf.rotate"
 bool MergeWithPdfium(const Job& job, const Progress& p, Result& r); // Merge PDF when a PDF is among the inputs
+bool RunMedia(const Job& job, const Progress& p, Result& r);       // audio and video, "to.mp4" ... and "media.*"
+bool MediaFrame(const wstring& path, std::vector<uint8_t>& png, wstring& err);   // a still from a video, for previews
 struct Image;
 bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err);
 

@@ -740,6 +740,12 @@ bool RunPreview(const Job& job, const Progress& p, Result& r)
     Image img;
     std::vector<uint8_t> bytes, out;
     if (job.outPath.empty()) { r.error = L"No place for the preview."; return false; }
+    if (IsMedia(KindOfPath(job.inputs[0]))) {
+        // A video: a still from FFmpeg; its size is in the PNG's header.
+        if (!MediaFrame(job.inputs[0], out, r.error)) return false;
+        if (out.size() > 24) r.info.Set(L"w", int(out[16] << 24 | out[17] << 16 | out[18] << 8 | out[19])).Set(L"h", int(out[20] << 24 | out[21] << 16 | out[22] << 8 | out[23]));
+        return WriteOutput(job, job.inputs[0], L"", L".png", out, p, r);
+    }
     if (KindOfPath(job.inputs[0]) == Kind::Pdf) {
         // A PDF's first page, drawn at the size the preview needs.
         if (!PdfPreview(job.inputs[0], Opt(job, L"max", 2048), img, r.error)) return false;

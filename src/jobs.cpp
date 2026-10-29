@@ -150,6 +150,18 @@ void Jobs::OnLine(int id, const std::string& line)
     }
 }
 
+void Jobs::RemovePart(const wstring& part, int attempt)
+{
+    DWORD a = GetFileAttributesW(part.c_str());
+    if (a == INVALID_FILE_ATTRIBUTES) return;
+    if (a & FILE_ATTRIBUTE_DIRECTORY) DeleteTree(part);
+    else DeleteFileW(part.c_str());
+    if (GetFileAttributesW(part.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        if (attempt < 10) After(0.5, [this, part, attempt] { RemovePart(part, attempt + 1); });
+        else Log(L"jobs: could not remove the partial file %s", part.c_str());
+    }
+}
+
 void Jobs::OnExit(int id, DWORD code)
 {
     for (size_t i = 0; i < running_.size(); i++) {
@@ -162,12 +174,9 @@ void Jobs::OnExit(int id, DWORD code)
             if (s.id != id) continue;
             if (cancelled) {
                 s.phase = JobState::Cancelled;
-                // The worker was stopped mid-write: its partial output goes.
-                if (!s.part.empty()) {
-                    DWORD a = GetFileAttributesW(s.part.c_str());
-                    if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) DeleteTree(s.part);
-                    else DeleteFileW(s.part.c_str());
-                }
+                // The worker was stopped mid-write: its partial output goes (tried again for a few seconds,
+                // in case a process that was just ended still holds it).
+                if (!s.part.empty()) RemovePart(s.part, 0);
                 Log(L"jobs: %s cancelled", s.title.c_str());
             } else if (code == 0 && !s.out.empty()) {
                 s.phase = JobState::Done;
@@ -198,11 +207,16 @@ void Jobs::Cancel(int id)
     for (auto& r : running_) {
         if (r->id == id && !r->cancelled) {
             r->cancelled = true;
-            TerminateProcess(r->process, 1);   // the reader thread sees the end and reports it
-            // The hidden Office it started would otherwise stay behind with the file open.
+            // First the helper (FFmpeg, or a hidden Office) the worker started, waiting until it has let go
+            // of the partial file; then the worker, whose end the reader thread reports.
             for (auto& s : states_)
                 if (s.id == id && s.helper)
-                    if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, s.helper)) { TerminateProcess(h, 1); CloseHandle(h); }
+                    if (HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, s.helper)) {
+                        TerminateProcess(h, 1);
+                        WaitForSingleObject(h, 3000);
+                        CloseHandle(h);
+                    }
+            TerminateProcess(r->process, 1);
         }
     }
 }

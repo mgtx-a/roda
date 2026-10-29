@@ -11,7 +11,8 @@ const wchar_t* WheelName(WheelKind k);
 
 enum class Kind : uint8_t {
     Unknown, Folder, Jpeg, Png, Webp, Gif, Bmp, Tiff, Ico, Svg, Heic, Avif, Zip, Tar, Gzip, Rar, Pdf,
-    Docx, Markdown, Html, Rtf, Txt, Xlsx, Ods, Csv, Tsv, Xls, Srt, Vtt, Doc, Pptx, Ppt, Count
+    Docx, Markdown, Html, Rtf, Txt, Xlsx, Ods, Csv, Tsv, Xls, Srt, Vtt, Doc, Pptx, Ppt,
+    Mp3, M4a, Wav, Flac, Ogg, Opus, Aiff, Wma, Mp4, Mov, Mkv, Webm, Avi, Wmv, Count
 };
 using KindSet = uint64_t;
 constexpr KindSet Bit(Kind k) { return KindSet(1) << unsigned(k); }
@@ -25,6 +26,10 @@ constexpr KindSet kSubtitles = Bit(Kind::Srt) | Bit(Kind::Vtt);
 constexpr KindSet kWordFiles = Bit(Kind::Docx) | Bit(Kind::Doc) | Bit(Kind::Rtf);
 constexpr KindSet kExcelFiles = Bit(Kind::Xlsx) | Bit(Kind::Xls) | Bit(Kind::Ods);
 constexpr KindSet kPowerPointFiles = Bit(Kind::Pptx) | Bit(Kind::Ppt);
+constexpr KindSet kAudio = Bit(Kind::Mp3) | Bit(Kind::M4a) | Bit(Kind::Wav) | Bit(Kind::Flac) | Bit(Kind::Ogg) | Bit(Kind::Opus) |
+                           Bit(Kind::Aiff) | Bit(Kind::Wma);
+constexpr KindSet kVideo = Bit(Kind::Mp4) | Bit(Kind::Mov) | Bit(Kind::Mkv) | Bit(Kind::Webm) | Bit(Kind::Avi) | Bit(Kind::Wmv);
+inline bool IsMedia(Kind k) { return (Bit(k) & (kAudio | kVideo)) != 0; }
 
 Kind KindFromExtension(const wstring& path);
 /// From the first bytes of a file; falls back to the extension when they say nothing.
@@ -35,13 +40,13 @@ Kind KindOfPath(const wstring& path);
 const wchar_t* KindLabel(Kind k);              // "PNG"
 inline bool IsImage(Kind k) { return (Bit(k) & kImages) != 0; }
 
-enum class Icon : uint8_t { None, Compress, Resize, Crop, Rotate, Flip, Strip, Merge, Extract, Copy, Move, Folder, Path, Terminal, Float, Share, Archive, Split, Images };
+enum class Icon : uint8_t { None, Compress, Resize, Crop, Rotate, Flip, Strip, Merge, Extract, Copy, Move, Folder, Path, Terminal, Float, Share, Archive, Split, Images, Trim, Mute, Audio, Film };
 
 /// Optional engines: DLLs in the "engines" folder next to Roda.exe (the Full build).
-enum class Engine : uint8_t { None, Pdfium, Word, Excel, PowerPoint };   // Office apps: when installed
+enum class Engine : uint8_t { None, Pdfium, Word, Excel, PowerPoint, Ffmpeg };   // Office apps: when installed
 bool EngineAvailable(Engine e);   // the DLL is there (checked once)
 wstring EnginePath(Engine e);
-enum class Popup : uint8_t { None, Quality, Size, Crop };
+enum class Popup : uint8_t { None, Quality, Size, Crop, Trim };
 
 // ---------------------------------------------------------------- jobs
 

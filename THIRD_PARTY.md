@@ -25,6 +25,20 @@ Its licence texts are in [`licenses/pdfium/`](licenses/pdfium). (ICU's text ment
 its build scripts, which are not part of the DLL.) Its headers are vendored in `third_party/pdfium`; the DLL
 is downloaded by `build.sh` and checked against the SHA-256 above.
 
+**FFmpeg** ships separately too, as `engines\ffmpeg\` in the Full build (`ffmpeg.exe`, `ffprobe.exe` and
+their DLLs; Roda runs them from a worker for audio and video only; without them those options are hidden):
+
+| Component | Version | Licence | Source (archive SHA-256) |
+|---|---|---|---|
+| FFmpeg, LGPL shared build by BtbN/FFmpeg-Builds | n8.1.3-9-g29e619e767 (autobuild-2026-09-30-13-08) | LGPL-3.0-or-later (built with `--enable-version3`, no GPL parts); its libraries (libmp3lame LGPL, libopus/libvorbis/libvpx/libwebp BSD, dav1d BSD, …) under their own licences | https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-09-30-13-08 — x64 `3e47bda1607740550141e37c0e49d1e5182b34699f15adfd137ee266d346811a`, ARM64 `7674d11915c95c8f65eeec36b329917c3023f6bae5786549cc47aed52cc1cea7` |
+
+LGPL: the DLLs are separate files that anyone may replace with their own build of the same FFmpeg
+version; the FFmpeg source is at https://ffmpeg.org/ (git tag `n8.1.3`), and the exact build scripts
+at https://github.com/BtbN/FFmpeg-Builds. The licence text is in [`licenses/ffmpeg/`](licenses/ffmpeg).
+This development build is large (~180 MB) and includes features Roda never uses (network protocols,
+hardware devices): Roda only lets it read and write local files (`-protocol_whitelist file,pipe`). A
+trimmed build made in CI, with only what Roda needs, is planned to replace it.
+
 \* Shortened; full hashes:
 - libwebp: `668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37`
 - lunasvg: `3420175c9632007edfcd0198001abc116c5c646af8e928d393cd029985cc4ee8`

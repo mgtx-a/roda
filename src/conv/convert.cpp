@@ -74,6 +74,10 @@ bool RunConvert(const Job& job, const Progress& p, Result& r)
 {
     wstring target = job.op.substr(job.op.find(L'.') + 1);   // "to.png" -> "png"
     Kind kind = KindOfPath(job.inputs[0]);
+    // Audio and video targets (and GIF to video) go to FFmpeg, whatever the input's kind.
+    static const wchar_t* media[] = { L"mp4", L"mov", L"mkv", L"webm", L"avi", L"wmv", L"gif", L"mp3", L"m4a", L"wav", L"flac", L"ogg", L"opus", L"aiff", L"wma" };
+    for (auto* m : media)
+        if (target == m && (IsMedia(kind) || (kind == Kind::Gif && target != L"gif"))) return RunMedia(job, p, r);
     if (IsImage(kind)) return RunToImage(job, p, r);
     if (target == L"pdf" && (Bit(kind) & (kWordFiles | kExcelFiles | kPowerPointFiles))) return RunOfficePdf(job, kind, p, r);
     if (kind == Kind::Pdf) return RunPdfTo(job, target, p, r);

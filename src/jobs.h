@@ -36,6 +36,7 @@ private:
     bool Start(int id);
     void OnLine(int id, const std::string& line);
     void OnExit(int id, DWORD code);
+    void RemovePart(const wstring& part, int attempt);
 
     HANDLE jobObject_ = nullptr;
     int nextId_ = 1;

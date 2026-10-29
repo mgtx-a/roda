@@ -48,6 +48,20 @@ Kind KindFromExtension(const wstring& path)
     if (e == L".doc") return Kind::Doc;
     if (e == L".pptx") return Kind::Pptx;
     if (e == L".ppt") return Kind::Ppt;
+    if (e == L".mp3") return Kind::Mp3;
+    if (e == L".m4a" || e == L".aac" || e == L".m4b") return Kind::M4a;
+    if (e == L".wav") return Kind::Wav;
+    if (e == L".flac") return Kind::Flac;
+    if (e == L".ogg" || e == L".oga") return Kind::Ogg;
+    if (e == L".opus") return Kind::Opus;
+    if (e == L".aif" || e == L".aiff" || e == L".aifc") return Kind::Aiff;
+    if (e == L".wma") return Kind::Wma;
+    if (e == L".mp4" || e == L".m4v") return Kind::Mp4;
+    if (e == L".mov" || e == L".qt") return Kind::Mov;
+    if (e == L".mkv") return Kind::Mkv;
+    if (e == L".webm") return Kind::Webm;
+    if (e == L".avi") return Kind::Avi;
+    if (e == L".wmv" || e == L".asf") return Kind::Wmv;
     if (e == L".srt") return Kind::Srt;
     if (e == L".vtt") return Kind::Vtt;
     return Kind::Unknown;
@@ -62,6 +76,17 @@ Kind KindFromBytes(const uint8_t* p, size_t n, const wstring& path)
     if (n >= 3 && p[0] == 0xFF && p[1] == 0xD8 && p[2] == 0xFF) return Kind::Jpeg;
     if (at(0, "\x89PNG\r\n\x1a\n")) return Kind::Png;
     if (at(0, "RIFF") && at(8, "WEBP")) return Kind::Webp;
+    if (at(0, "RIFF") && at(8, "WAVE")) return Kind::Wav;
+    if (at(0, "RIFF") && at(8, "AVI ")) return Kind::Avi;
+    if (at(0, "FORM") && (at(8, "AIFF") || at(8, "AIFC"))) return Kind::Aiff;
+    if (at(0, "fLaC")) return Kind::Flac;
+    if (at(0, "OggS")) return n > 36 && memcmp(p + 28, "OpusHead", 8) == 0 ? Kind::Opus : Kind::Ogg;
+    if (at(0, "\x1A\x45\xDF\xA3")) {   // Matroska; WebM says so in its header
+        for (size_t i = 0; i + 4 < std::min<size_t>(n, 64); i++) if (memcmp(p + i, "webm", 4) == 0) return Kind::Webm;
+        return Kind::Mkv;
+    }
+    if (at(0, "\x30\x26\xB2\x75\x8E\x66\xCF\x11")) return KindFromExtension(path) == Kind::Wma ? Kind::Wma : Kind::Wmv;   // ASF
+    if (at(0, "ID3") || (n > 2 && p[0] == 0xFF && (p[1] & 0xE6) == 0xE2 && KindFromExtension(path) == Kind::Mp3)) return Kind::Mp3;
     if (at(0, "GIF87a") || at(0, "GIF89a")) return Kind::Gif;
     if (at(0, "BM") && n >= 14) return Kind::Bmp;
     if (at(0, "II*\0") || at(0, "MM\0*")) return Kind::Tiff;
@@ -69,6 +94,10 @@ Kind KindFromBytes(const uint8_t* p, size_t n, const wstring& path)
     if (at(4, "ftyp")) {
         if (at(8, "avif") || at(8, "avis")) return Kind::Avif;
         if (at(8, "heic") || at(8, "heix") || at(8, "mif1") || at(8, "msf1") || at(8, "heim") || at(8, "heis") || at(8, "hevc")) return Kind::Heic;
+        if (at(8, "qt  ")) return Kind::Mov;
+        if (at(8, "M4A ") || at(8, "M4B ")) return Kind::M4a;
+        Kind e = KindFromExtension(path);
+        return e == Kind::M4a || e == Kind::Mov ? e : Kind::Mp4;
     }
     if (at(0, "PK\x03\x04") || at(0, "PK\x05\x06")) {
         // .docx, .xlsx and .ods are zips too: the name says which.
@@ -112,7 +141,8 @@ const wchar_t* KindLabel(Kind k)
 {
     static const wchar_t* names[] = { L"", L"folder", L"JPG", L"PNG", L"WEBP", L"GIF", L"BMP", L"TIFF", L"ICO", L"SVG",
                                       L"HEIC", L"AVIF", L"ZIP", L"TAR", L"GZIP", L"RAR", L"PDF", L"DOCX", L"Markdown", L"HTML",
-                                      L"RTF", L"TXT", L"XLSX", L"ODS", L"CSV", L"TSV", L"XLS", L"SRT", L"VTT", L"DOC", L"PPTX", L"PPT" };
+                                      L"RTF", L"TXT", L"XLSX", L"ODS", L"CSV", L"TSV", L"XLS", L"SRT", L"VTT", L"DOC", L"PPTX", L"PPT", L"MP3", L"M4A", L"WAV", L"FLAC", L"OGG", L"OPUS",
+                                      L"AIFF", L"WMA", L"MP4", L"MOV", L"MKV", L"WEBM", L"AVI", L"WMV" };
     return unsigned(k) < sizeof names / sizeof names[0] ? names[unsigned(k)] : L"";
 }
 
@@ -177,6 +207,22 @@ const std::vector<Converter>& Converters()
         { L"to.tsv",  WheelKind::Convert, L"TSV",  kSheets, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.srt",  WheelKind::Convert, L"SRT",  kSubtitles, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.vtt",  WheelKind::Convert, L"VTT",  kSubtitles, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        // Audio and video, through FFmpeg (the Full build). A video's sound track can become any audio format.
+        { L"to.mp4", WheelKind::Convert, L"MP4", kVideo | Bit(Kind::Gif), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.mov", WheelKind::Convert, L"MOV", kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.mkv", WheelKind::Convert, L"MKV", kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.webm", WheelKind::Convert, L"WEBM", kVideo | Bit(Kind::Gif), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.avi", WheelKind::Convert, L"AVI", kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.wmv", WheelKind::Convert, L"WMV", kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.gif", WheelKind::Convert, L"GIF", kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.mp3", WheelKind::Convert, L"MP3", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.m4a", WheelKind::Convert, L"M4A", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.wav", WheelKind::Convert, L"WAV", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.flac", WheelKind::Convert, L"FLAC", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.ogg", WheelKind::Convert, L"OGG", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.opus", WheelKind::Convert, L"OPUS", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.aiff", WheelKind::Convert, L"AIFF", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.wma", WheelKind::Convert, L"WMA", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
 
         // Tools.
         { L"tool.compress",   WheelKind::Tools, L"Compress",    kCompressible, Icon::Compress, C::PerFile, 1, 0, Popup::Quality, RunImageTool },
@@ -193,6 +239,15 @@ const std::vector<Converter>& Converters()
         { L"pdf.images",      WheelKind::Tools, L"Images",      Bit(Kind::Pdf), Icon::Images, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.rotate",      WheelKind::Tools, L"Rotate",      Bit(Kind::Pdf), Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"tool.extract",    WheelKind::Tools, L"Extract",     kArchives, Icon::Extract, C::PerFile, 1, 0, Popup::None, RunExtract },
+        { L"media.trim",      WheelKind::Tools, L"Trim",        kAudio | kVideo, Icon::Trim, C::PerFile, 1, 1, Popup::Trim, RunMedia, Engine::Ffmpeg },
+        { L"media.compress",  WheelKind::Tools, L"Compress",    kAudio | kVideo, Icon::Compress, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
+        { L"media.audio",     WheelKind::Tools, L"Audio only",  kVideo, Icon::Audio, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
+        { L"media.mute",      WheelKind::Tools, L"Mute",        kVideo, Icon::Mute, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
+        { L"media.1080",      WheelKind::Tools, L"1080p",       kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
+        { L"media.720",       WheelKind::Tools, L"720p",        kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
+        { L"media.480",       WheelKind::Tools, L"480p",        kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
+        { L"media.crop",      WheelKind::Tools, L"Crop",        kVideo, Icon::Crop, C::PerFile, 1, 1, Popup::Crop, RunMedia, Engine::Ffmpeg },
+        { L"media.merge",     WheelKind::Tools, L"Join",        kAudio, Icon::Merge, C::AllInOne, 2, 0, Popup::None, RunMedia, Engine::Ffmpeg },
 
         // Actions: anything, folders and mixed selections included. Run by the UI, except packing.
         { L"act.copyto",   WheelKind::Actions, L"Copy to…",  kAnything, Icon::Copy, C::Action, 1, 0, Popup::None, nullptr },
@@ -201,7 +256,7 @@ const std::vector<Converter>& Converters()
         { L"act.copyrecent", WheelKind::Actions, L"",        kAnything, Icon::Folder, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.copypath", WheelKind::Actions, L"Copy path", kAnything, Icon::Path, C::Action, 1, 0, Popup::None, nullptr },
         { L"act.terminal", WheelKind::Actions, L"Terminal",  kAnything, Icon::Terminal, C::Action, 1, 0, Popup::None, nullptr },
-        { L"act.float",    WheelKind::Actions, L"Float",     kImages | Bit(Kind::Pdf), Icon::Float, C::Action, 1, 1, Popup::None, nullptr },
+        { L"act.float",    WheelKind::Actions, L"Float",     kImages | Bit(Kind::Pdf) | kVideo, Icon::Float, C::Action, 1, 1, Popup::None, nullptr },
         { L"pack.zip",     WheelKind::Actions, L"ZIP",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         { L"pack.targz",   WheelKind::Actions, L"TAR.GZ",    kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         { L"pack.tar",     WheelKind::Actions, L"TAR",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
@@ -213,17 +268,19 @@ const std::vector<Converter>& Converters()
 
 wstring EnginePath(Engine e)
 {
-    return e == Engine::Pdfium ? JoinPath(ExeDir(), L"engines\\pdfium.dll") : L"";
+    if (e == Engine::Pdfium) return JoinPath(ExeDir(), L"engines\\pdfium.dll");
+    if (e == Engine::Ffmpeg) return JoinPath(ExeDir(), L"engines\\ffmpeg\\ffmpeg.exe");
+    return L"";
 }
 
 bool EngineAvailable(Engine e)
 {
     if (e == Engine::None) return true;
     // Looked for once: installing Office or adding the DLL while Roda runs is rare (a restart picks it up).
-    static int found[5] = { 1, -1, -1, -1, -1 };
+    static int found[6] = { 1, -1, -1, -1, -1, -1 };
     int& f = found[int(e)];
     if (f < 0) {
-        if (e == Engine::Pdfium) f = GetFileAttributesW(EnginePath(Engine::Pdfium).c_str()) != INVALID_FILE_ATTRIBUTES;
+        if (e == Engine::Pdfium || e == Engine::Ffmpeg) f = GetFileAttributesW(EnginePath(e).c_str()) != INVALID_FILE_ATTRIBUTES;
         else {
             // An Office app is installed when its automation name is registered (only read, never written).
             const wchar_t* prog = e == Engine::Word ? L"Word.Application" : e == Engine::Excel ? L"Excel.Application" : L"PowerPoint.Application";

@@ -4,15 +4,17 @@ Roda (Malay for "wheel") is a portable, offline file converter for Windows 10 an
 Shift, Ctrl or Alt, and a wheel of options opens under the pointer. Drop the file on an option and it is
 converted or acted on, locally.
 
-> **Status: Phase 3, awaiting hand-tests.** Pictures, PDFs, documents, spreadsheets, subtitles,
-> archives and file actions work. Audio and video come in Phase 4.
+> **Status: Phase 4, awaiting hand-tests.** Pictures, PDFs, documents, spreadsheets, subtitles, audio,
+> video, archives and file actions work. Phase 5 (a settings window, a first-run tour) is next.
 
 ## Download
 Not released yet (builds from every push are under the repository's Actions tab). Two builds, for x64 and ARM64, neither needing an installer, admin rights or a runtime:
 
-- **Full** (a zip): `Roda.exe` plus `engines\pdfium.dll` for PDFs. Unzip it anywhere, including a USB
-  stick; delete the folder to remove it.
-- **Lite**: `Roda.exe` alone, everything except PDFs (the PDF options are simply not shown).
+- **Full** (a zip): `Roda.exe` plus `engines\pdfium.dll` for PDFs and `engines\ffmpeg\` for audio and
+  video. Unzip it anywhere, including a USB stick; delete the folder to remove it. For now it is large
+  (about 75 MB zipped) because the FFmpeg inside is a general-purpose build; a trimmed one is planned.
+- **Lite**: `Roda.exe` alone (under 2 MB), everything except PDFs, audio and video (those options are
+  simply not shown).
 
 ## How to use
 1. Start `Roda.exe`. A wheel icon appears in the tray.
@@ -54,6 +56,14 @@ Actions wheel.
   TSV each sheet becomes its own file in a folder when there are several. CSVs with semicolons (as Excel
   writes them in many countries) are recognised. CSV comes out as UTF-8 with the mark Excel needs.
 - **Subtitles**: SRT ↔ VTT, both → TXT (just the words).
+- **Audio** (Full build): MP3, M4A (AAC), WAV, FLAC, OGG, Opus, AIFF and WMA into each other. A
+  video's sound can become any of them too. Tools: Trim (start and end, like `1:30`), Compress (a lower
+  bitrate; WAV, FLAC and AIFF become AAC), Join (several files one after another, in the order dropped).
+- **Video** (Full build): MP4, MOV, MKV, WebM, AVI and WMV into each other, and into GIF; a GIF into
+  MP4 or WebM. When only the container changes and the streams fit (MKV to MP4 with H.264, say), they
+  are copied untouched: fast and lossless. Otherwise MP4/MOV/MKV get H.264 (Windows' own encoder;
+  MPEG-4 on Windows editions without it), WebM gets VP9 and Opus. Tools: Trim, Compress (about half the
+  bitrate), Audio only, Mute, 1080p / 720p / 480p, Crop (on a still from the video). Float shows a still.
 - **Office files to PDF**, when Microsoft Office is installed: Word (DOCX, DOC, RTF), Excel (XLSX, XLS,
   ODS) and PowerPoint (PPTX, PPT) make the PDF themselves, so it looks exactly as in Office. Office runs
   hidden and opens the file read-only; the option doesn't appear on PCs without that Office app.
@@ -79,7 +89,7 @@ Known limits: a drag from an app running as administrator can't open the wheel (
 normal app receive drops from an elevated one); don't run Roda as administrator to get around it.
 A PDF made of scanned pages has no text to extract (no OCR); password-protected PDFs are refused with a
 plain message. Not yet: RAR extraction, AVIF/HEIC output, Share, PDF to XLSX, PDF compression, DOCX →
-PDF without Office installed, audio and video (Phase 4).
+PDF without Office installed, joining videos, a still from a video as a picture.
 
 ## Privacy & permissions
 Roda makes **no network connections**: no telemetry, no update checks, nothing is uploaded.
@@ -96,6 +106,8 @@ What it touches:
   below-normal priority), so a damaged file can only stop its own worker. Results are written next to
   the original, or in `outputFolder` if you set one. Copy to / Move to use Explorer's own file engine.
   PDFs are read by `engines\pdfium.dll`, which only workers load, by its full path, when a PDF is opened.
+  Audio and video are converted by `engines\ffmpeg\ffmpeg.exe`, started by a worker and only allowed to
+  read and write local files (no network); cancelling a job ends it.
 - **Microsoft Office** (only for "to PDF" of Office files, only if installed): the worker starts Word,
   Excel or PowerPoint invisibly, opens the file read-only, saves the PDF and closes it. It quits Office
   afterwards unless other files are open in it; cancelling the job ends an Office it started. Whether
@@ -124,6 +136,8 @@ For scripts and tests (`start /wait` from cmd, as Roda.exe is a Windows app):
     Roda.exe --convert report.pdf outdir\ --op to.png --option dpi=150
     Roda.exe --convert report.pdf outdir\ --op pdf.split
     Roda.exe --convert book.xlsx book.csv
+    Roda.exe --convert video.mkv video.mp4
+    Roda.exe --convert video.mp4 clip.mp4 --op media.trim --option start=12 --option end=45
     Roda.exe --info photo.webp
 
 It exits with 0 on success, 1 when the file could not be converted (with an `error:` line), 2 for bad

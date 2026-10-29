@@ -214,6 +214,56 @@ convert "$CORPUS/sample.vtt" "$T2/c.srt" --op to.srt && { has "$T2/c.srt" "Hi & 
 convert "$CORPUS/sample.vtt" "$T2/d.txt" --op to.txt && has "$T2/d.txt" "Second cue."
 convert "$CORPUS/sample.srt" "$T2/e.txt" --op to.txt && { has "$T2/e.txt" "Hello there."; has "$T2/e.txt" "Two lines of text."; }
 
+# ---------------------------------------------------------------- audio and video (when engines/ffmpeg is next to the exe)
+FFDIR="$(dirname "$EXE")/engines/ffmpeg"
+if [ -f "$FFDIR/ffmpeg.exe" ]; then
+  M="$WORK/media"; mkdir -p "$M"
+  dur() { "$FFDIR/ffprobe.exe" -v error -show_entries format=duration -of csv=p=0 "$1" 2>/dev/null | tr -d '\r'; }
+  near() { awk -v a="$1" -v b="$2" 'BEGIN { d = a - b; if (d < 0) d = -d; exit !(a != "" && d < 0.35) }'; }
+  # Every audio file into every audio format; every video into every format; a GIF into video.
+  for f in tone.wav tone.mp3 tone.m4a tone.flac tone.ogg tone.opus tone.aiff tone.wma clip.mp4 clip.mov clip.mkv clip.webm clip.avi clip.wmv animated.gif; do
+    for t in mp3 m4a wav flac ogg opus aiff wma mp4 mov mkv webm avi wmv gif; do
+      case "$f" in
+        tone.*) case $t in mp4|mov|mkv|webm|avi|wmv|gif) continue ;; esac ;;
+        animated.gif) case $t in mp4|webm) ;; *) continue ;; esac ;;
+      esac
+      [ "${f##*.}" = "$t" ] && continue
+      out="$M/${f%.*}-${f##*.}.$t"
+      roda --convert "$(win "$CORPUS/$f")" "$(win "$out")" --op to.$t
+      d="$(dur "$out")"
+      want=2; [ "$f" = animated.gif ] && want="$(dur "$CORPUS/$f")"
+      [ $RC -eq 0 ] && near "$d" "$want" && ok || bad "$f -> $t: rc=$RC duration '$d' (expected $want) $OUT"
+    done
+  done
+  # Copied, not re-encoded, when only the container changes (MKV of VP9+Opus into WebM: identical streams).
+  roda --convert "$(win "$CORPUS/clip.mkv")" "$(win "$M/copy.webm")" --op to.webm
+  [ "$(stat -c %s "$M/copy.webm")" -gt 40000 ] && [ "$(stat -c %s "$M/copy.webm")" -lt 70000 ] && ok || bad "MKV -> WebM was not a stream copy"
+  # Tools.
+  roda --convert "$(win "$CORPUS/clip.mp4")" "$(win "$M/t.mp4")" --op media.trim --option start=0.5 --option end=1.5
+  near "$(dur "$M/t.mp4")" 1 && ok || bad "trim: $(dur "$M/t.mp4") $OUT"
+  roda --convert "$(win "$CORPUS/tone.mp3")" "$(win "$CORPUS/tone.wav")" "$(win "$M/j.mp3")" --op media.merge
+  near "$(dur "$M/j.mp3")" 4 && ok || bad "join: $(dur "$M/j.mp3") $OUT"
+  roda --convert "$(win "$CORPUS/clip.mp4")" "$(win "$M/a.m4a")" --op media.audio
+  [ $RC -eq 0 ] && [ -z "$("$FFDIR/ffprobe.exe" -v error -select_streams v -show_entries stream=codec_type -of csv=p=0 "$M/a.m4a")" ] && ok || bad "audio only: $OUT"
+  roda --convert "$(win "$CORPUS/clip.mp4")" "$(win "$M/m.mp4")" --op media.mute
+  [ $RC -eq 0 ] && [ -z "$("$FFDIR/ffprobe.exe" -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "$M/m.mp4")" ] && ok || bad "mute: $OUT"
+  roda --convert "$(win "$CORPUS/clip.mp4")" "$(win "$M/c.mp4")" --op media.crop --option crop=10,10,160,120
+  [ "$("$FFDIR/ffprobe.exe" -v error -select_streams v -show_entries stream=width,height -of csv=p=0 "$M/c.mp4" | tr -d '\r')" = "160,120" ] && ok || bad "video crop: $OUT"
+  roda --convert "$(win "$CORPUS/clip.wmv")" "$(win "$M/s.mp4")" --op media.compress
+  [ $RC -eq 0 ] && [ "$(stat -c %s "$M/s.mp4")" -lt "$(stat -c %s "$CORPUS/clip.wmv")" ] && ok || bad "video compress: $OUT"
+  roda --convert "$(win "$CORPUS/clip.mp4")" "$(win "$M/s2.mp4")" --op media.compress
+  { [ $RC -eq 0 ] && [ "$(stat -c %s "$M/s2.mp4")" -lt "$(stat -c %s "$CORPUS/clip.mp4")" ]; } || { [ $RC -eq 1 ] && [[ "$OUT" == *"already well compressed"* ]] && [ ! -e "$M/s2.mp4" ]; } && ok || bad "compress grew a file: $OUT"
+  roda --convert "$(win "$CORPUS/tone.wav")" "$(win "$M/s.m4a")" --op media.compress; [ $RC -eq 0 ] && ok || bad "audio compress: $OUT"
+  roda --convert "$(win "$CORPUS/clip.mp4")" "$(win "$M/r.mp4")" --op media.720
+  [ $RC -eq 1 ] && [[ "$OUT" == *"already 240 pixels"* ]] && ok || bad "720p of a small video: $OUT"
+  roda --convert "$(win "$CORPUS/tone.mp3")" "$(win "$M/x.mp4")" --op to.mp4
+  [ $RC -eq 1 ] && ok || bad "a picture-less MP4: $OUT"
+  roda --convert "$(win "$CORPUS/garbage.jpg")" "$(win "$M/g.mp3")" --op to.mp3
+  [ $RC -eq 1 ] && [[ "$OUT" == error:* ]] && [ ! -e "$M/g.mp3" ] && ok || bad "garbage to MP3: $OUT"
+else
+  echo "(no engines/ffmpeg next to the exe: audio and video tests skipped)"
+fi
+
 # ---------------------------------------------------------------- broken files fail cleanly
 for in in empty.png truncated.png garbage.jpg; do
   roda --convert "$(win "$CORPUS/$in")" "$(win "$WORK/broken-$in.webp")"
