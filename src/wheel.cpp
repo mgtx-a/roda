@@ -15,6 +15,9 @@ constexpr double kRing0In = 54, kRing0Out = 150;    // up to 8 options
 constexpr double kRing1In = 156, kRing1Out = 230;   // the rest
 constexpr double kGrow = 6;                         // a hovered segment reaches out this far
 constexpr double kMargin = 30;                      // room around the disc for the shadow and the hover
+constexpr double kTabH = 24, kTabGap = 10;        // the Convert · Tools · Files tabs above the disc
+constexpr double kTabRoom = kTabH + kTabGap + 4;
+constexpr int kTabHit = -10;                        // HitTest: kTabHit - i is tab i
 constexpr int kPerRing = 8;
 constexpr size_t kMagicLimit = 200;                 // beyond this many items, judge by extension (no file reads)
 
@@ -130,7 +133,8 @@ LRESULT Wheel::Handle(UINT m, WPARAM w, LPARAM l)
         case WM_LBUTTONUP:
             if (keyboard_ && open()) {
                 int h = HitTest(CursorPos());
-                if (h >= 0) Choose(h);
+                if (h <= kTabHit) { Switch(static_cast<WheelKind>(kTabHit - h)); if (!segs_.empty()) SetHot(0); }
+                else if (h >= 0) Choose(h);
                 else if (h == -1) { Log(L"wheel: cancelled"); Hide(); }
             }
             return 0;
@@ -199,9 +203,10 @@ void Wheel::Show(WheelKind kind, const std::vector<wstring>& paths, double keySe
     kinds_.clear();
     // Magic bytes for the first items (so a mislabelled file still gets the right wheel), the name for the rest.
     for (size_t i = 0; i < paths_.size(); i++) kinds_.push_back(i < kMagicLimit ? KindOfPath(paths_[i]) : KindFromExtension(paths_[i]));
+    for (int i = 0; i < 3; i++) avail_[i] = !OptionsFor(static_cast<WheelKind>(i), kinds_, settings_).empty();
     kind_ = kind;
     if (!Build()) {
-        Log(L"wheel: %s has nothing for %s, so the Actions wheel opens", WheelName(kind), CentreText().c_str());
+        Log(L"wheel: %s has nothing for %s, so the Files wheel opens", WheelName(kind), CentreText().c_str());
         kind_ = WheelKind::Actions;
         if (!Build()) return;
     }
@@ -221,19 +226,19 @@ void Wheel::ShowForKeyboard(const std::vector<wstring>& paths)
     SetHot(0);
 }
 
-void Wheel::Open(double keySeenAt)
+void Wheel::Open(double keySeenAt, bool keepCentre)
 {
     token_++;
     opens_++;
     shown_ = true; closing_ = false; dropped_ = false; chosen_ = -1;
     keySeenAt_ = keySeenAt;
 
-    centre_ = CursorPos();
+    if (!keepCentre) centre_ = CursorPos();
     scale_ = ScaleAt(centre_);
     surf_.SetScale(scale_);
     bool twoRings = segs_.size() > size_t(kPerRing);
     double outer = twoRings ? kRing1Out : kRing0Out;
-    sizeDip_ = 2 * (outer + kGrow + kMargin);
+    sizeDip_ = 2 * (outer + kGrow + kMargin + kTabRoom);
     int px = int(std::lround(sizeDip_ * scale_));
 
     // The disc stays whole on the screen under the pointer; only the shadow may spill over.
@@ -241,7 +246,8 @@ void Wheel::Open(double keySeenAt)
     int disc = int(std::lround((outer + kGrow) * scale_));
     POINT c = centre_;
     c.x = std::clamp<LONG>(c.x, mon.work.left + disc, std::max<LONG>(mon.work.left + disc, mon.work.right - disc));
-    c.y = std::clamp<LONG>(c.y, mon.work.top + disc, std::max<LONG>(mon.work.top + disc, mon.work.bottom - disc));
+    int top = disc + int(std::lround(kTabRoom * scale_));   // the tabs stay on the screen too
+    c.y = std::clamp<LONG>(c.y, mon.work.top + top, std::max<LONG>(mon.work.top + top, mon.work.bottom - disc));
     centre_ = c;
     frame_ = { c.x - px / 2, c.y - px / 2, c.x - px / 2 + px, c.y - px / 2 + px };
     surf_.Resize(px, px);
@@ -267,9 +273,9 @@ void Wheel::Switch(WheelKind kind)
     if (!Build()) { kind_ = before; Build(); return; }   // nothing there for these files: stay
     bool sizeChanged = (count > size_t(kPerRing)) != (segs_.size() > size_t(kPerRing));
     if (sizeChanged) {
-        // The other wheel needs another window size: re-open it under the pointer.
+        // The other wheel needs another window size: re-open it where it was (the pointer may be on a tab).
         bool kb = keyboard_;
-        Open(-1);
+        Open(-1, true);
         keyboard_ = kb;
         Log(L"wheel: switched to %s", WheelName(kind_));
         return;
@@ -317,6 +323,10 @@ int Wheel::HitTest(POINT p) const
 {
     double k = std::max(0.5, open_.value) * scale_;
     double dx = (p.x - centre_.x) / k, dy = (p.y - centre_.y) / k;
+    for (int i = 0; i < 3; i++) {
+        const auto& t = tabs_[i];
+        if (avail_[i] && dx >= t.left - 3 && dx <= t.right + 3 && dy >= t.top - 3 && dy <= t.bottom + 3) return kTabHit - i;
+    }
     double d = std::sqrt(dx * dx + dy * dy);
     if (d < kRing0In) return -1;
     bool twoRings = segs_.size() > size_t(kPerRing);
@@ -372,6 +382,8 @@ DWORD Wheel::OnDragOver(POINTL pt, DWORD allowed)
 {
     if (!shown_ || closing_) return DROPEFFECT_NONE;
     int h = HitTest({ pt.x, pt.y });
+    // Dragging onto a tab opens that wheel; the drop still has to land on an option.
+    if (h <= kTabHit && static_cast<WheelKind>(kTabHit - h) != kind_) Switch(static_cast<WheelKind>(kTabHit - h));
     SetHot(h);
     return h >= 0 ? CopyEffect(allowed) : DROPEFFECT_NONE;
 }
@@ -477,6 +489,26 @@ void Wheel::Draw()
     }
     if (twoRings) rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), float(kRing0Out + 3), float(kRing0Out + 3)), surf_.Solid(th.sep), 1.0f);
 
+    // The tabs: every wheel by name, so nobody has to guess what Space or Tab does next.
+    float tw[3], total = 0;
+    for (int i = 0; i < 3; i++) { tw[i] = surf_.MeasureText(WheelName(WheelKind(i)), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 22; total += tw[i]; }
+    total += 2 * 6;
+    float x = c - total / 2, ty = c - R - float(kTabGap + kTabH);
+    for (int i = 0; i < 3; i++) {
+        tabs_[i] = D2D1::RectF(x - c, ty - c, x + tw[i] - c, ty + float(kTabH) - c);   // relative to the centre, for HitTest
+        D2D1_ROUNDED_RECT pill = D2D1::RoundedRect(D2D1::RectF(x, ty, x + tw[i], ty + float(kTabH)), float(kTabH / 2), float(kTabH / 2));
+        bool on = i == int(kind_), hover = hot_ == kTabHit - i;
+        uint32_t ink = on ? th.accentText : avail_[i] ? th.text : WithAlpha(th.dim, 0.5);
+        if (on) rt->FillRoundedRectangle(pill, surf_.Solid(th.accent));
+        else {
+            rt->FillRoundedRectangle(pill, surf_.Solid(hover ? WithAlpha(th.accent, 0.3) : th.glass));
+            rt->DrawRoundedRectangle(pill, surf_.Solid(th.edge), 1.0f);
+        }
+        const wchar_t* name = WheelName(WheelKind(i));
+        surf_.DrawText(name, 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(x + 11, ty + 4, x + tw[i], ty + float(kTabH)), ink);
+        x += tw[i] + 6;
+    }
+
     // The centre: what is being dragged, which wheel, and Cancel.
     bool cancelHot = hot_ == -1;
     float cr = float(kCentre);
@@ -488,15 +520,10 @@ void Wheel::Draw()
         wstring top = Ellipsize(surf_, CentreText(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, 84);
         float tw = surf_.MeasureText(top.c_str(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         surf_.DrawText(top.c_str(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(c - tw / 2, c - 17, c + tw / 2 + 2, c + 2), th.text);
-        const wchar_t* name = WheelName(kind_);
-        float bw = surf_.MeasureText(name, 11, DWRITE_FONT_WEIGHT_NORMAL);
-        surf_.DrawText(name, 11, DWRITE_FONT_WEIGHT_NORMAL, D2D1::RectF(c - bw / 2, c + 1, c + bw / 2 + 2, c + 16), th.dim);
-        // Three dots: Convert, Tools, Actions; the open one filled.
-        for (int i = 0; i < 3; i++) {
-            D2D1_POINT_2F d = D2D1::Point2F(c - 9 + i * 9.0f, c + 24);
-            if (i == int(kind_)) rt->FillEllipse(D2D1::Ellipse(d, 2.6f, 2.6f), surf_.Solid(th.accent));
-            else rt->DrawEllipse(D2D1::Ellipse(d, 2.2f, 2.2f), surf_.Solid(th.dim), 0.9f);
-        }
+        // How to reach the next wheel: Space while dragging, Tab from the keyboard.
+        const wchar_t* hint = keyboard_ ? L"Tab: next" : L"Space: next";
+        float bw = surf_.MeasureText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL);
+        surf_.DrawText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL, D2D1::RectF(c - bw / 2, c + 1, c + bw / 2 + 2, c + 16), th.dim);
     }
 
     surf_.End();

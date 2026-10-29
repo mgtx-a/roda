@@ -27,7 +27,7 @@ Until the first release, test builds are on the repository's **Actions** tab.
 3. While still holding the mouse button, press **Space**. A wheel opens with the formats it can change
    into (Convert). Press **Space** or **Tab** again for the next wheel:
    - **Tools**: edit the file: smaller, resized, cropped, rotated...
-   - **Actions**: copy, move, zip, and so on
+   - **Files**: copy, move, zip, and so on
 4. Let go of the mouse on the choice you want.
 5. A small card in the bottom-right corner shows the progress. When it's done, click **Open** or
    **Show in folder**.
@@ -41,7 +41,7 @@ To cancel: press **Esc**, or let go in the middle of the wheel. To stop a job th
 The first time you start Roda, a short tour shows you how it works.
 
 Space is safe: if the wheel doesn't open, the file just drops back where it was. (Shift, Ctrl and Alt
-still open the Convert, Tools and Actions wheels too, but Windows also uses them while you drag: a drop
+still open the Convert, Tools and Files wheels too, but Windows also uses them while you drag: a drop
 with Ctrl held makes a copy, with Shift a move, with Alt a shortcut.)
 
 ### Other ways to open the wheel

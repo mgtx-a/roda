@@ -15,7 +15,7 @@ struct Step {
 
 const Step kSteps[] = {
     { L"Drag a file, then press Space", L"Start dragging a picture or a document. While the mouse button is still down, press Space.",
-      L"A wheel of formats opens under the pointer. Space or Tab again: tools, then actions.", 0 },
+      L"A wheel of formats opens under the pointer. Space or Tab again: Tools, then Files.", 0 },
     { L"Drop it on a format", L"Move onto a segment and let go. The result is saved next to the original, under a new name.",
       L"A card in the corner shows it, with Open and Show in folder. Esc or the centre cancels.", 1 },
     { L"You're all set", L"No dragging? Select files and right-click them (Shift + right-click on Windows 11), or press Ctrl + Alt + R.",

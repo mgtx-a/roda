@@ -12,7 +12,7 @@ constexpr double kShadow = 26;   // room around the card for its shadow
 
 enum Row { RConvert, RTools, RActions, RHotkey, RSave, RFolder, RJpeg, RWebp, RDpi, RMeta, RTheme, RStartup, RExplorer, RCount };
 
-const wchar_t* kLabels[RCount] = { L"Convert wheel key", L"Tools wheel key", L"Actions wheel key", L"Hotkey for selected files",
+const wchar_t* kLabels[RCount] = { L"Convert wheel key", L"Tools wheel key", L"Files wheel key", L"Hotkey for selected files",
                                    L"Save results", L"Folder", L"JPEG quality", L"WebP quality", L"PDF pages as pictures",
                                    L"Photo info (EXIF)", L"Look", L"Start with Windows", L"Right-click in Explorer" };
 

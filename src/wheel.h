@@ -56,8 +56,8 @@ private:
     static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l);
     LRESULT Handle(UINT m, WPARAM w, LPARAM l);
     bool Build();                      // false when this wheel has nothing for these files
-    void Open(double keySeenAt);
-    int HitTest(POINT screen) const;   // segment index, -1 centre, -2 outside
+    void Open(double keySeenAt, bool keepCentre = false);
+    int HitTest(POINT screen) const;   // segment index, -1 centre, -2 outside, -10 - i tab i
     void SetHot(int i);
     void Choose(int i);
     void Present();
@@ -73,6 +73,8 @@ private:
     std::vector<Kind> kinds_;
     std::vector<Segment> segs_;
     int hot_ = -2;
+    bool avail_[3]{};               // Convert, Tools, Files: has something for these files
+    D2D1_RECT_F tabs_[3]{};         // the tabs, DIPs from the centre
     bool shown_ = false, closing_ = false, dropped_ = false, dirty_ = false, keyboard_ = false;
     POINT centre_{};                // screen pixels
     RECT frame_{};                  // window, screen pixels
