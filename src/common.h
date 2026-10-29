@@ -123,6 +123,7 @@ struct Settings {
     int theme = 0;                            // 0 as Windows, 1 light, 2 dark
     bool paused = false;
     bool welcomed = false;
+    bool explorerMenuSet = false;             // the Explorer entries were switched on once (the default); now they're the user's to switch off
     static Settings Load();
     void Save() const;
 };

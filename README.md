@@ -24,11 +24,11 @@ Until the first release, test builds are on the repository's **Actions** tab.
 ## How to use it
 1. Double-click `Roda.exe`. A small wheel icon appears near the clock.
 2. Start dragging a file, as if you were moving it.
-3. While still holding the mouse button, press one of these keys:
-   - **Shift**: change the file type (Convert)
-   - **Ctrl**: edit the file: smaller, resized, cropped, rotated... (Tools)
-   - **Alt**: copy, move, zip, and so on (Actions)
-4. A wheel opens. Let go of the mouse on the choice you want.
+3. While still holding the mouse button, press **Space**. A wheel opens with the formats it can change
+   into (Convert). Press **Space** or **Tab** again for the next wheel:
+   - **Tools**: edit the file: smaller, resized, cropped, rotated...
+   - **Actions**: copy, move, zip, and so on
+4. Let go of the mouse on the choice you want.
 5. A small card in the bottom-right corner shows the progress. When it's done, click **Open** or
    **Show in folder**.
 
@@ -40,16 +40,26 @@ To cancel: press **Esc**, or let go in the middle of the wheel. To stop a job th
 
 The first time you start Roda, a short tour shows you how it works.
 
+Space is safe: if the wheel doesn't open, the file just drops back where it was. (Shift, Ctrl and Alt
+still open the Convert, Tools and Actions wheels too, but Windows also uses them while you drag: a drop
+with Ctrl held makes a copy, with Shift a move, with Alt a shortcut.)
+
 ### Other ways to open the wheel
+- **Right-click:** select files and right-click them, then choose **Roda…**. On Windows 11, hold
+  **Shift** while you right-click (or choose *Show more options*). You can turn it off in Settings.
 - **Keyboard:** select files in File Explorer and press **Ctrl+Alt+R**. Use the arrow keys to choose,
-  **Enter** to go, **Esc** to cancel.
-- **Right-click:** turn on *Right-click in Explorer* in Settings. Files then get a **Roda…** item when
-  you right-click them. (On Windows 11, it's under *Show more options*.)
+  **Tab** for the next wheel, **Enter** to go, **Esc** to cancel.
 - **From a ZIP or an Outlook email:** drag a file straight out of an open ZIP folder or an email.
   The result is saved in your **Downloads** folder.
 
+### Merge files into one PDF
+Select two or more PDFs or pictures, then either press **Ctrl+Alt+M**, or right-click them and choose
+**Merge into one PDF** (on Windows 11, Shift + right-click). A list of the files opens: drag them
+into the order you want (or pick one and press **Alt+↑/↓**), then click **Merge**. The new PDF is saved
+next to the first file.
+
 ### Tips
-- Press the key **after** you start dragging, not before.
+- Press **Space** **after** you start dragging, not before.
 - The wheel only shows choices that work for the files you're dragging.
 - The wheel won't pop up while a game or full-screen video is in front.
 
@@ -94,7 +104,7 @@ Right-click the wheel icon near the clock and choose **Settings**. There you can
 - picture quality
 - light or dark look
 - start Roda with Windows
-- the right-click item in File Explorer
+- the right-click items in File Explorer (on unless you turn them off)
 
 Changes work straight away.
 

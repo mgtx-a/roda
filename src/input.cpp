@@ -169,6 +169,8 @@ void Trigger::Moved(POINT p)
                 // A drag may have started. Keys already held now (Shift+drag to move) are not a trigger press.
                 int keys[3] = { settings_.keyConvert, settings_.keyTools, settings_.keyActions };
                 for (int i = 0; i < 3; i++) keyWasDown_[i] = (GetAsyncKeyState(keys[i]) & 0x8000) != 0;
+                spaceWasDown_ = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+                tabWasDown_ = (GetAsyncKeyState(VK_TAB) & 0x8000) != 0;
                 // The window the button went down on: its thread starts the drag, if anyone does.
                 srcThread_ = GetWindowThreadProcessId(WindowFromPoint(down_), nullptr);
                 lastCapture_ = reinterpret_cast<HWND>(-1);   // so "no capture" is logged too
@@ -291,6 +293,16 @@ void Trigger::CheckKeys()
         if (!wheel_.open()) wheel_.Show(kind, paths_, Now());
         else wheel_.Switch(kind);
     }
+    // Space opens the wheel (Convert first), Space or Tab again moves to the next one. Windows leaves
+    // both alone during a drag, so a wheel that doesn't open never turns the drop into a copy, a move
+    // or a shortcut, as Ctrl, Shift and Alt do.
+    bool space = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0, tab = (GetAsyncKeyState(VK_TAB) & 0x8000) != 0;
+    if ((space && !spaceWasDown_) || (tab && !tabWasDown_)) {
+        if (!wheel_.open()) wheel_.Show(WheelKind::Convert, paths_, Now());
+        else wheel_.Next();
+    }
+    spaceWasDown_ = space;
+    tabWasDown_ = tab;
     if (wheel_.open() && (GetAsyncKeyState(VK_ESCAPE) & 0x8000)) {
         Log(L"wheel: Esc, cancelled");
         wheel_.Hide();

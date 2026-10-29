@@ -142,14 +142,7 @@ LRESULT Wheel::Handle(UINT m, WPARAM w, LPARAM l)
             else if (w == VK_RIGHT || w == VK_DOWN) SetHot(hot_ < 0 ? 0 : (hot_ + 1) % n);
             else if (w == VK_LEFT || w == VK_UP) SetHot(hot_ < 0 ? n - 1 : (hot_ + n - 1) % n);
             else if (w == VK_TAB) {
-                // Tab: the next wheel that has something for these files.
-                bool back = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-                for (int step = 1; step <= 2; step++) {
-                    auto k = static_cast<WheelKind>((int(kind_) + (back ? 3 - step : step)) % 3);
-                    WheelKind before = kind_;
-                    Switch(k);
-                    if (kind_ != before) break;
-                }
+                Next((GetKeyState(VK_SHIFT) & 0x8000) != 0);
                 if (!segs_.empty()) SetHot(0);
             }
             return 0;
@@ -285,6 +278,15 @@ void Wheel::Switch(WheelKind kind)
     dirty_ = true;
     RequestFrame();
     Log(L"wheel: switched to %s", WheelName(kind_));
+}
+
+void Wheel::Next(bool back)
+{
+    for (int step = 1; step <= 2; step++) {
+        WheelKind before = kind_;
+        Switch(static_cast<WheelKind>((int(kind_) + (back ? 3 - step : step)) % 3));
+        if (kind_ != before) break;
+    }
 }
 
 void Wheel::Hide(bool animated)

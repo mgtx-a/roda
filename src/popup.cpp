@@ -9,6 +9,7 @@ namespace {
 constexpr double kPad = 24;            // room for the shadow around the card
 constexpr double kHandle = 9;          // crop handles: how close counts
 constexpr double kBtnW = 92, kBtnH = 30;
+constexpr double kListTop = 50;        // Merge: where the list of files starts, below the title
 const wchar_t* kAspects[] = { L"Free", L"1:1", L"4:3", L"16:9" };
 const double kRatios[] = { 0, 1.0, 4.0 / 3.0, 16.0 / 9.0 };
 
@@ -67,6 +68,9 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
         w_ = origW * k + 40;
         h_ = origH * k + 46 + 12 + 30 + 18;
         w_ = std::max(w_, 380.0);
+    } else if (kind == Popup::Order) {
+        w_ = 400;
+        h_ = kListTop + names_.size() * RowH() + 10 + kBtnH + 16;
     } else {
         w_ = 320;
         h_ = 172;
@@ -87,6 +91,27 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
     SetForegroundWindow(hwnd_);
     SetFocus(hwnd_);
     Log(L"popup: %s", title.c_str());
+}
+
+void OptionsPopup::ShowOrder(const wstring& title, const std::vector<wstring>& names, POINT at)
+{
+    // shortcut: no scrolling; past about 16 files the rows get cramped. Add a scrolling list when merges that big turn up.
+    names_ = names;
+    order_.clear();
+    for (size_t i = 0; i < names.size(); i++) order_.push_back(i);
+    selected_ = 0;
+    Show(Popup::Order, title, at, 0);
+}
+
+/// Merge: the picked row goes to row `to`, the rows between shift up or down.
+void OptionsPopup::MoveRow(int to)
+{
+    to = std::clamp(to, 0, int(order_.size()) - 1);
+    if (to == selected_) return;
+    size_t moving = order_[size_t(selected_)];
+    order_.erase(order_.begin() + selected_);
+    order_.insert(order_.begin() + to, moving);
+    selected_ = to;
 }
 
 void OptionsPopup::Hide()
@@ -113,6 +138,10 @@ OptionsPopup::Part OptionsPopup::HitTest(double x, double y, int* aspect) const
     if (In(x, y, L + w_ - 20 - 2 * kBtnW - 8, by, kBtnW, kBtnH)) return Part::Cancel;
     if (kind_ == Popup::Quality && In(x, y, L + 12, T + 60, w_ - 24, 30)) return Part::Slider;
     if (kind_ == Popup::Pages && In(x, y, L + 20, T + 64, w_ - 40, 34)) return Part::Width;
+    if (kind_ == Popup::Order && In(x, y, L + 20, T + kListTop, w_ - 40, order_.size() * RowH())) {
+        *aspect = int((y - T - kListTop) / RowH());
+        return Part::Row;
+    }
     if (kind_ == Popup::Size || kind_ == Popup::Trim) {
         if (In(x, y, L + 20, T + 64, 124, 34)) return Part::Width;
         if (In(x, y, L + w_ - 20 - 124, T + 64, 124, 34)) return Part::Height;
@@ -158,6 +187,10 @@ void OptionsPopup::Drag(double x, double y)
     if (drag_ == Part::Slider) {
         double f = (x - (kPad + 20)) / (w_ - 40);
         quality_ = std::clamp(int(std::lround(f * 100)), 1, 100);
+        return;
+    }
+    if (drag_ == Part::Row) {   // the row follows the pointer; the others make way
+        MoveRow(int(std::floor((y - kPad - kListTop) / RowH())));
         return;
     }
     D2D1_RECT_F pr = PictureRect();
@@ -225,6 +258,10 @@ void OptionsPopup::Apply()
         int x = int(std::lround(cx_ * origW_)), y = int(std::lround(cy_ * origH_));
         int w = std::max(1, int(std::lround(cw_ * origW_))), h = std::max(1, int(std::lround(ch_ * origH_)));
         opts.Set(L"crop", std::to_wstring(x) + L"," + std::to_wstring(y) + L"," + std::to_wstring(w) + L"," + std::to_wstring(h));
+    } else if (kind_ == Popup::Order) {
+        wstring order;
+        for (size_t i : order_) order += (order.empty() ? L"" : L",") + std::to_wstring(i);
+        opts.Set(L"order", order);
     }
     auto fn = onApply;
     Hide();
@@ -241,7 +278,8 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             Part p = HitTest(x, y, &a);
             if (p == Part::Width || p == Part::Height) { field_ = p == Part::Width ? 0 : 1; dirty_ = true; RequestFrame(); return 0; }
             if (p == Part::Aspect) { SetAspect(a); dirty_ = true; RequestFrame(); return 0; }
-            if (p == Part::Slider || (p >= Part::CropMove && p <= Part::CropSW)) {
+            if (p == Part::Row) selected_ = a;
+            if (p == Part::Slider || p == Part::Row || (p >= Part::CropMove && p <= Part::CropSW)) {
                 drag_ = p;
                 dragX_ = x; dragY_ = y;
                 startX_ = cx_; startY_ = cy_; startW_ = cw_; startH_ = ch_;
@@ -286,13 +324,23 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 case Part::CropNE: case Part::CropSW: c = IDC_SIZENESW; break;
                 case Part::Width: case Part::Height: c = IDC_IBEAM; break;
                 case Part::Apply: case Part::Cancel: case Part::Aspect: case Part::Slider: c = IDC_HAND; break;
+                case Part::Row: c = IDC_SIZENS; break;
                 default: break;
             }
             SetCursor(LoadCursorW(nullptr, c));
             return TRUE;
         }
+        case WM_SYSKEYDOWN:   // Alt+arrows come this way
+            if (kind_ != Popup::Order || (w != VK_UP && w != VK_DOWN)) break;
+            [[fallthrough]];
         case WM_KEYDOWN: {
             if (w == VK_ESCAPE) { Log(L"popup: cancelled"); Hide(); return 0; }
+            if (kind_ == Popup::Order && (w == VK_UP || w == VK_DOWN)) {
+                // Arrows pick a row; with Alt or Ctrl they move it.
+                int to = selected_ + (w == VK_UP ? -1 : 1);
+                if (m == WM_SYSKEYDOWN || (GetKeyState(VK_CONTROL) & 0x8000)) MoveRow(to);
+                else selected_ = std::clamp(to, 0, int(order_.size()) - 1);
+            }
             if (w == VK_RETURN) { Apply(); return 0; }
             if (kind_ == Popup::Quality && (w == VK_LEFT || w == VK_RIGHT)) {
                 int step = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 5;
@@ -355,7 +403,8 @@ void OptionsPopup::Draw()
         surf_.DrawText(label, 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(x + (kBtnW - tw) / 2, y + 6.5, tw + 4, 18), primary ? th.accentText : th.text);
     };
     float by = T + H - 16 - float(kBtnH);
-    const wchar_t* verb = kind_ == Popup::Quality ? L"Compress" : kind_ == Popup::Size ? L"Resize" : kind_ == Popup::Trim ? L"Trim" : kind_ == Popup::Pages ? L"Remove" : L"Crop";
+    const wchar_t* verb = kind_ == Popup::Quality ? L"Compress" : kind_ == Popup::Size ? L"Resize" : kind_ == Popup::Trim ? L"Trim" : kind_ == Popup::Pages ? L"Remove" :
+                          kind_ == Popup::Order ? L"Merge" : L"Crop";
     button(L + W - 20 - float(kBtnW), by, verb, true, hover_ == Part::Apply);
     button(L + W - 20 - 2 * float(kBtnW) - 8, by, L"Cancel", false, hover_ == Part::Cancel);
 
@@ -399,6 +448,24 @@ void OptionsPopup::Draw()
         float cw = width_.empty() ? 0 : surf_.MeasureText(width_.c_str(), 13, DWRITE_FONT_WEIGHT_NORMAL);
         rt->DrawLine(D2D1::Point2F(L + 32 + cw + 1, T + 73), D2D1::Point2F(L + 32 + cw + 1, T + 89), surf_.Solid(th.text), 1);
         surf_.DrawText(L"Page numbers, like 2 or 5-7, with commas between", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, T + 104, fw, 16), th.dim);
+    } else if (kind_ == Popup::Order) {
+        // The files top to bottom, in the order their pages will come: number, name, and a grip to drag by.
+        float rh = float(RowH()), y0 = T + float(kListTop);
+        for (size_t i = 0; i < order_.size(); i++) {
+            float y = y0 + float(i) * rh;
+            bool picked = int(i) == selected_;
+            rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(L + 20, y + 1, W - 40, rh - 3), 7, 7),
+                                     surf_.Solid(picked ? WithAlpha(th.accent, 0.18) : th.button));
+            if (picked) rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(L + 20.75, y + 1.75, W - 41.5f, rh - 4.5f), 6.5f, 6.5f), surf_.Solid(th.accent), 1.5f);
+            float ty = y + (rh - 18) / 2;
+            wstring n = std::to_wstring(i + 1);
+            surf_.DrawText(n.c_str(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(L + 32, ty, 22, 18), picked ? th.accent : th.dim);
+            wstring name = Ellipsize(surf_, names_[order_[i]], 12.5f, DWRITE_FONT_WEIGHT_NORMAL, W - 40 - 34 - 34);
+            surf_.DrawText(name.c_str(), 12.5f, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 56, ty, W - 40 - 34 - 34, 18), th.text);
+            for (int k = 0; k < 3; k++)   // the grip: three short lines
+                rt->DrawLine(D2D1::Point2F(L + W - 42, y + rh / 2 - 4 + k * 4), D2D1::Point2F(L + W - 30, y + rh / 2 - 4 + k * 4), surf_.Solid(th.dim), 1.2f);
+        }
+        surf_.DrawText(L"Drag to reorder, or Alt+↑↓", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by + 8, W - 40 - 2 * float(kBtnW) - 16, 16), th.dim);
     } else if (kind_ == Popup::Crop) {
         wstring dims = std::to_wstring(int(std::lround(cw_ * origW_))) + L" × " + std::to_wstring(int(std::lround(ch_ * origH_)));
         float dw = surf_.MeasureText(dims.c_str(), 12, DWRITE_FONT_WEIGHT_NORMAL);

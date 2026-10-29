@@ -28,6 +28,7 @@ constexpr UINT WM_SHOW_SETTINGS = WM_APP + 3;   // from a second start of Roda.e
 constexpr UINT WM_SHOW_TOUR = WM_APP + 4;
 constexpr UINT_PTR TIMER_MODAL = 99;
 constexpr int HOTKEY_WHEEL = 1;
+constexpr int HOTKEY_MERGE = 2;   // Ctrl+Alt+M: the files selected in Explorer, merged into one PDF
 
 enum Cmd { CmdOutput = 1, CmdPause, CmdStartup, CmdSettings, CmdTour, CmdLog, CmdQuit };
 
@@ -90,6 +91,8 @@ void SetStartup(bool on)
 // and folders under HKEY_CURRENT_USER (no admin rights), removed again when switched off.
 
 const wchar_t* kVerbKeys[] = { L"Software\\Classes\\*\\shell\\Roda", L"Software\\Classes\\Directory\\shell\\Roda" };
+// "Merge into one PDF", on PDFs and pictures only: straight to the order of the files.
+const wchar_t* kMergeTypes[] = { L".pdf", L".jpg", L".jpeg", L".png", L".webp", L".gif", L".bmp", L".tif", L".tiff", L".heic", L".avif", L".svg", L".ico" };
 
 bool ExplorerMenuOn()
 {
@@ -101,22 +104,24 @@ bool ExplorerMenuOn()
 
 void SetExplorerMenu(bool on)
 {
-    for (auto* key : kVerbKeys) {
-        if (!on) { RegDeleteTreeW(HKEY_CURRENT_USER, key); continue; }
+    auto verb = [on](const wstring& key, const wchar_t* label, const wchar_t* option) {
+        if (!on) { RegDeleteTreeW(HKEY_CURRENT_USER, key.c_str()); return; }
         HKEY k = nullptr, c = nullptr;
-        if (RegCreateKeyExW(HKEY_CURRENT_USER, key, 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS) continue;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, key.c_str(), 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS) return;
         auto set = [](HKEY h, const wchar_t* name, const wstring& v) { RegSetValueExW(h, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(v.c_str()), DWORD((v.size() + 1) * 2)); };
-        set(k, L"MUIVerb", L"Roda…");
+        set(k, L"MUIVerb", label);
         set(k, L"Icon", L"\"" + ExePath() + L"\",0");
         set(k, L"MultiSelectModel", L"Player");   // a selection of many files is one wheel, not one per file
         if (RegCreateKeyExW(k, L"command", 0, nullptr, 0, KEY_WRITE, nullptr, &c, nullptr) == ERROR_SUCCESS) {
-            set(c, nullptr, L"\"" + ExePath() + L"\" --open \"%1\"");
+            set(c, nullptr, L"\"" + ExePath() + L"\" " + option + L" \"%1\"");
             RegCloseKey(c);
         }
         RegCloseKey(k);
-    }
+    };
+    for (auto* key : kVerbKeys) verb(key, L"Roda…", L"--open");
+    for (auto* type : kMergeTypes) verb(wstring(L"Software\\Classes\\SystemFileAssociations\\") + type + L"\\shell\\RodaMerge", L"Merge into one PDF", L"--merge");
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-    Log(on ? L"explorer menu: added (HKCU\\Software\\Classes\\*\\shell\\Roda and Directory\\shell\\Roda)" : L"explorer menu: removed");
+    Log(on ? L"explorer menu: added (Roda… on files and folders, Merge into one PDF on PDFs and pictures)" : L"explorer menu: removed");
 }
 
 // ---------------------------------------------------------------- the app
@@ -136,7 +141,7 @@ struct App {
     std::map<int, std::function<void(const JobState&)>> waiting;   // quiet jobs (previews): who wants the result
     HINSTANCE inst = nullptr;
     NOTIFYICONDATAW nid{};
-    bool trayAdded = false, hotkey = false, fastTimer = false;
+    bool trayAdded = false, hotkey = false, mergeHotkey = false, fastTimer = false;
     double nextFrame = 0, lastFrame = 0;
     UINT taskbarCreated = 0;
 
@@ -156,8 +161,13 @@ struct App {
         SetThemeOverride(settings.theme);
         settingsUi.onKeysChanged = [this] {
             if (hotkey) UnregisterHotKey(g_msg, HOTKEY_WHEEL);
+            if (mergeHotkey) UnregisterHotKey(g_msg, HOTKEY_MERGE);
             RegisterWheelHotkey();
         };
+        // The Explorer entries are on from the first start; after that they're the user's to switch off.
+        // An entry from an older Roda gains the ones added since (Merge into one PDF).
+        if (!TestMode() && !settings.explorerMenuSet) { SetExplorerMenu(true); settings.explorerMenuSet = true; settings.Save(); }
+        else if (ExplorerMenuOn()) SetExplorerMenu(true);
         settingsUi.startupOn = [] { return StartupOn(); };
         settingsUi.setStartup = [](bool on) { if (on != StartupOn()) SetStartup(on); };
         settingsUi.explorerMenuOn = [] { return ExplorerMenuOn(); };
@@ -189,6 +199,7 @@ struct App {
     {
         jobs.CancelAll();
         if (hotkey) UnregisterHotKey(g_msg, HOTKEY_WHEEL);
+        if (mergeHotkey) UnregisterHotKey(g_msg, HOTKEY_MERGE);
         if (fastTimer) timeEndPeriod(1);
         trigger.Enable(false);
         if (trayAdded) Shell_NotifyIconW(NIM_DELETE, &nid);
@@ -278,11 +289,13 @@ struct App {
     std::vector<wstring> lastOpened; // the last batch shown, in case more of the same selection arrives
     double lastOpenedAt = -10;
     uint32_t openToken = 0;
+    bool openMerge = false;          // they came from "Merge into one PDF", not "Roda…"
 
-    void Open(const wstring& path)
+    void Open(const wstring& path, bool merge = false)
     {
         if (path.empty()) return;
         opened.push_back(path);
+        openMerge = merge;
         uint32_t t = ++openToken;
         // Explorer starts the verb once per selected file, each a moment apart: wait for the rest, then
         // one wheel for all. Stragglers after that join the wheel already open.
@@ -290,6 +303,7 @@ struct App {
             if (t != openToken || opened.empty() || settings.paused) return;
             std::vector<wstring> paths = std::move(opened);
             opened.clear();
+            if (openMerge) { Log(L"explorer menu: merge %d item(s)", int(paths.size())); ShowMerge(paths); return; }
             if (wheel.open() && Now() - lastOpenedAt < 3) {
                 paths.insert(paths.begin(), lastOpened.begin(), lastOpened.end());
                 wheel.Hide(false);
@@ -337,13 +351,27 @@ struct App {
         // Options first: the popup opens where the wheel was.
         popup.onApply = [this, o, paths](const Json& opts) {
             if (opts.has(L"q")) { settings.compressQuality = int(opts[L"q"].Num()); settings.Save(); }
-            Submit(o, paths, opts);
+            // Merge: the files in the order picked ("2,0,1" names them by where they were).
+            std::vector<wstring> ordered;
+            const wstring order = opts.has(L"order") ? opts[L"order"].Str() : L"";
+            for (size_t a = 0, b; a < order.size(); a = b + 1) {
+                b = order.find(L',', a);
+                if (b == wstring::npos) b = order.size();
+                size_t i = size_t(_wtoi(order.substr(a, b - a).c_str()));
+                if (i < paths.size()) ordered.push_back(paths[i]);
+            }
+            Submit(o, ordered.size() == paths.size() ? ordered : paths, opts);
         };
         wstring title = paths.size() == 1 ? o.label + L" " + FileName(paths[0]) : o.label + L" " + std::to_wstring(paths.size()) + L" pictures";
         if (c->popup == Popup::Quality) popup.Show(Popup::Quality, L"Compress", at, settings.compressQuality);
         else if (c->popup == Popup::Size) popup.Show(Popup::Size, L"Resize to", at, 0);
         else if (c->popup == Popup::Pages) popup.Show(Popup::Pages, L"Remove pages from " + FileName(paths[0]), at, 0);
         else if (c->popup == Popup::Trim) popup.Show(Popup::Trim, L"Trim " + (paths.size() == 1 ? FileName(paths[0]) : L""), at, 0);
+        else if (c->popup == Popup::Order) {
+            std::vector<wstring> names;
+            for (auto& p : paths) names.push_back(FileName(p));
+            popup.ShowOrder(L"Merge " + std::to_wstring(paths.size()) + L" files into one PDF", names, at);
+        }
         else if (c->popup == Popup::Crop) {
             Preview(paths[0], 1200, [this, at, title](const wstring& png, int w, int h) { popup.Show(Popup::Crop, title, at, 0, png, w, h); });
         }
@@ -355,6 +383,41 @@ struct App {
     {
         hotkey = RegisterHotKey(g_msg, HOTKEY_WHEEL, UINT(settings.hotkeyMods) | MOD_NOREPEAT, UINT(settings.hotkeyKey)) != FALSE;
         if (!hotkey) Log(L"hotkey: could not register it (another app uses it); change hotkeyMods/hotkeyKey in settings.json");
+        mergeHotkey = RegisterHotKey(g_msg, HOTKEY_MERGE, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'M') != FALSE;
+        if (!mergeHotkey) Log(L"hotkey: could not register Ctrl+Alt+M (another app uses it)");
+    }
+
+    /// Merge PDF straight away (the Explorer entry, Ctrl+Alt+M): the order of the PDFs and pictures among `paths`.
+    void ShowMerge(std::vector<wstring> paths)
+    {
+        const Converter* c = FindConverter(L"tool.mergepdf");
+        if (!c) return;
+        std::erase_if(paths, [&](const wstring& p) { return (Bit(KindOfPath(p)) & c->inputs) == 0; });
+        POINT at = CursorPos();
+        cards.AnchorAt(at);
+        if (paths.size() < 2) { cards.Note(L"Merge PDF", L"Select two or more PDFs or pictures to merge into one PDF."); return; }
+        Chosen({ c, c->label, L"", c->icon }, paths, at);
+    }
+
+    void OnMergeHotkey()
+    {
+        auto paths = ExplorerSelection();
+        if (paths.empty()) {
+            // Not Explorer, or nothing selected there: the keys are the app's in front (Word's Ctrl+Alt+M
+            // is a new comment). Let go of them, send them on, and take them back once they've arrived.
+            UnregisterHotKey(g_msg, HOTKEY_MERGE);
+            mergeHotkey = false;
+            INPUT in[2]{};
+            in[0].type = in[1].type = INPUT_KEYBOARD;
+            in[0].ki.wVk = in[1].ki.wVk = 'M';
+            in[1].ki.dwFlags = KEYEVENTF_KEYUP;
+            SendInput(2, in, sizeof(INPUT));
+            After(0.3, [this] { if (!mergeHotkey) mergeHotkey = RegisterHotKey(g_msg, HOTKEY_MERGE, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'M') != FALSE; });
+            return;
+        }
+        if (settings.paused || wheel.open() || popup.shown()) return;
+        Log(L"hotkey: merge %d item(s) selected in Explorer", int(paths.size()));
+        ShowMerge(paths);
     }
 
     void OnHotkey()
@@ -523,12 +586,15 @@ LRESULT CALLBACK MsgProc(HWND h, UINT m, WPARAM w, LPARAM l)
         case WM_SHOW_SETTINGS: if (g_app) g_app->settingsUi.Show(); return 0;
         case WM_COPYDATA: {
             auto* cd = reinterpret_cast<COPYDATASTRUCT*>(l);
-            if (g_app && cd && cd->dwData == 1 && cd->cbData >= 2) g_app->Open(wstring(static_cast<const wchar_t*>(cd->lpData), cd->cbData / 2 - 1));
+            // 1: "Roda…", 2: "Merge into one PDF"
+            if (g_app && cd && (cd->dwData == 1 || cd->dwData == 2) && cd->cbData >= 2)
+                g_app->Open(wstring(static_cast<const wchar_t*>(cd->lpData), cd->cbData / 2 - 1), cd->dwData == 2);
             return TRUE;
         }
         case WM_SHOW_TOUR: if (g_app) g_app->StartTour(); return 0;
         case WM_HOTKEY:
             if (g_app && w == HOTKEY_WHEEL) g_app->OnHotkey();
+            if (g_app && w == HOTKEY_MERGE) g_app->OnMergeHotkey();
             return 0;
         case WM_TRAY:
             if (g_app && (LOWORD(l) == WM_RBUTTONUP || LOWORD(l) == WM_LBUTTONUP)) g_app->TrayMenu();
@@ -587,12 +653,14 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int)
     if (TestMode()) lockName += L".Test." + std::to_wstring(std::hash<wstring>{}(DataDir()) % 1000000);
     HANDLE mutex = CreateMutexW(nullptr, TRUE, lockName.c_str());
     bool another = !mutex || GetLastError() == ERROR_ALREADY_EXISTS;   // read now: later calls overwrite the error
-    // "Roda.exe --open <path>": from the Explorer entry.
+    // "Roda.exe --open <path>" or "--merge <path>": from the Explorer entries.
     wstring openPath;
+    bool merge = false;
     {
         int n = 0;
         wchar_t** a = CommandLineToArgvW(GetCommandLineW(), &n);
-        for (int i = 1; i + 1 < n; i++) if (!wcscmp(a[i], L"--open")) openPath = a[i + 1];
+        for (int i = 1; i + 1 < n; i++)
+            if (!wcscmp(a[i], L"--open") || !wcscmp(a[i], L"--merge")) { openPath = a[i + 1]; merge = !wcscmp(a[i], L"--merge"); }
         LocalFree(a);
     }
     if (another) {
@@ -605,7 +673,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int)
             GetWindowThreadProcessId(other, &pid);
             AllowSetForegroundWindow(pid);
             if (!openPath.empty()) {
-                COPYDATASTRUCT cd{ 1, DWORD((openPath.size() + 1) * 2), const_cast<wchar_t*>(openPath.c_str()) };
+                COPYDATASTRUCT cd{ ULONG_PTR(merge ? 2 : 1), DWORD((openPath.size() + 1) * 2), const_cast<wchar_t*>(openPath.c_str()) };
                 SendMessageTimeoutW(other, WM_COPYDATA, 0, LPARAM(&cd), SMTO_ABORTIFHUNG, 3000, nullptr);
             } else {
                 PostMessageW(other, wcsstr(GetCommandLineW(), L"--tour") ? WM_SHOW_TOUR : WM_SHOW_SETTINGS, 0, 0);
@@ -629,7 +697,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int)
         App app;
         g_app = &app;
         app.Start(inst);
-        if (!openPath.empty()) app.Open(openPath);   // started by the Explorer entry
+        if (!openPath.empty()) app.Open(openPath, merge);   // started by an Explorer entry
         rc = app.Run();
         app.Shutdown();
         Log(L"quit");

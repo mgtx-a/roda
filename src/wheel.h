@@ -22,6 +22,8 @@ public:
     /// The keyboard route: same wheel, but it takes the focus. Arrows, Tab, Enter, Esc.
     void ShowForKeyboard(const std::vector<wstring>& paths);
     void Switch(WheelKind kind);
+    /// The next wheel (or the one before) that has something for these files.
+    void Next(bool back = false);
     void Hide(bool animated = true);
     /// The mouse button went up. A drop on the wheel arrives about now from the drag source;
     /// if none does, the wheel closes.

@@ -509,6 +509,7 @@ void Settings::Save() const
         j += "  \""; j += k; j += "\": "; AppendJsonString(j, i < recentFolders.size() ? recentFolders[i] : wstring()); j += ",\n";
     }
     flag("paused", paused);
+    flag("explorerMenuSet", explorerMenuSet);
     j += "  \"welcomed\": "; j += welcomed ? "true" : "false"; j += "\n}\n";
     EnsureDir(DataDir());
     WriteAllBytes(JoinPath(DataDir(), L"settings.json"), j.data(), j.size());
@@ -539,6 +540,7 @@ Settings Settings::Load()
     }
     s.paused = ParseBool(j, "paused", s.paused);
     s.welcomed = ParseBool(j, "welcomed", s.welcomed);
+    s.explorerMenuSet = ParseBool(j, "explorerMenuSet", s.explorerMenuSet);
     return s;
 }
 

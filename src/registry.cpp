@@ -234,7 +234,7 @@ const std::vector<Converter>& Converters()
         { L"tool.rotate",     WheelKind::Tools, L"Rotate",      kImages, Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunImageTool },
         { L"tool.flip",       WheelKind::Tools, L"Flip",        kImages, Icon::Flip, C::PerFile, 1, 0, Popup::None, RunImageTool },
         { L"tool.strip",      WheelKind::Tools, L"Strip info",  kStrippable, Icon::Strip, C::PerFile, 1, 0, Popup::None, RunImageTool },
-        { L"tool.mergepdf",   WheelKind::Tools, L"Merge PDF",   kImages | Bit(Kind::Pdf), Icon::Merge, C::AllInOne, 2, 0, Popup::None, RunMergePdf },
+        { L"tool.mergepdf",   WheelKind::Tools, L"Merge PDF",   kImages | Bit(Kind::Pdf), Icon::Merge, C::AllInOne, 2, 0, Popup::Order, RunMergePdf },
         { L"pdf.split",       WheelKind::Tools, L"Split",       Bit(Kind::Pdf), Icon::Split, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.images",      WheelKind::Tools, L"Images",      Bit(Kind::Pdf), Icon::Images, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.rotate",      WheelKind::Tools, L"Rotate",      Bit(Kind::Pdf), Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },

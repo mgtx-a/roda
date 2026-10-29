@@ -46,7 +46,7 @@ enum class Icon : uint8_t { None, Compress, Resize, Crop, Rotate, Flip, Strip, M
 enum class Engine : uint8_t { None, Pdfium, Word, Excel, PowerPoint, Ffmpeg };   // Office apps: when installed
 bool EngineAvailable(Engine e);   // the DLL is there (checked once)
 wstring EnginePath(Engine e);
-enum class Popup : uint8_t { None, Quality, Size, Crop, Trim, Pages, Place };   // Place: the Sign window
+enum class Popup : uint8_t { None, Quality, Size, Crop, Trim, Pages, Place, Order };   // Place: the Sign window; Order: Merge's file order
 
 // ---------------------------------------------------------------- jobs
 

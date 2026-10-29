@@ -62,6 +62,7 @@ private:
     int rawEvents_ = 0;
     std::vector<wstring> paths_;
     bool keyWasDown_[3]{};            // Convert, Tools, Actions: as last seen
+    bool spaceWasDown_ = false, tabWasDown_ = false;
 };
 
 }  // namespace rd
