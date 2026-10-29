@@ -13,7 +13,7 @@ Works on Windows 10 and 11. No installing, no admin rights, no account.
 ## Get it
 There are two versions:
 
-- **Full** (a zip, about 30 MB): does everything, including PDFs, audio and video.
+- **Full** (a zip, about 23 MB once unzipped): does everything, including PDFs, audio and video.
 - **Lite** (one file, under 2 MB): everything except PDFs, audio and video.
 
 Unzip it anywhere you like, even a USB stick, and double-click `Roda.exe`. To remove Roda, just delete
