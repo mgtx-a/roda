@@ -58,7 +58,7 @@ The first time you start Roda, a short tour shows you how it works.
 | Files | Change into | Tools |
 |---|---|---|
 | **Photos** (JPG, PNG, WebP, GIF, BMP, TIFF, ICO, SVG, HEIC, AVIF) | JPG, PNG, WebP, PDF, TIFF, BMP, ICO | Make smaller, resize, crop, rotate, flip, remove photo info, join into one PDF |
-| **PDFs** \* | Pictures (PNG, JPG), text, Word (DOCX), ebook (EPUB), PowerPoint (PPTX) | Remove pages, split into pages, take out the pictures, rotate, join PDFs |
+| **PDFs** \* | Pictures (PNG, JPG), text, Word (DOCX), ebook (EPUB), PowerPoint (PPTX), MP3 (read aloud) | Remove pages, split into pages, take out the pictures, rotate, join PDFs |
 | **Documents** (Word DOCX, Markdown, HTML, RTF, TXT) | Each other, and ebook (EPUB) | |
 | **Word, Excel, PowerPoint** | PDF (only if Microsoft Office is on your PC) | |
 | **Spreadsheets** (Excel XLSX and XLS, ODS, CSV, TSV) | XLSX, ODS, CSV, TSV | |
@@ -85,6 +85,7 @@ Changes work straight away.
 - Read text from scanned PDFs, or open password-protected PDFs.
 - Turn Word files into PDF without Microsoft Office.
 - Open RAR files.
+- Read aloud in Malay: MP3 uses the voices Windows has, which are usually English only.
 - Save pictures as AVIF or HEIC (it can open them, but not save them).
 - Work with touch screens or pens.
 - Other languages besides English.
@@ -101,6 +102,8 @@ What Roda does on your PC, in plain words:
 - **Your files:** it reads the files you drop on the wheel and saves the new file next to them (or in
   the folder you chose). Each job runs as its own small helper process, so one broken file can't crash
   Roda.
+- **Read aloud (PDF to MP3)** uses the voice built into Windows. It works offline; nothing is sent
+  anywhere.
 - **Audio, video and PDFs** are handled by helper files in the `engines` folder (FFmpeg and PDFium).
   They run on your PC, can only read and write files, and contain no internet code.
 - **Microsoft Office:** for Word/Excel/PowerPoint to PDF, Roda asks your own Office to do it, hidden in

@@ -215,7 +215,7 @@ const std::vector<Converter>& Converters()
         { L"to.avi", WheelKind::Convert, L"AVI", kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
         { L"to.wmv", WheelKind::Convert, L"WMV", kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
         { L"to.gif", WheelKind::Convert, L"GIF", kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
-        { L"to.mp3", WheelKind::Convert, L"MP3", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
+        { L"to.mp3", WheelKind::Convert, L"MP3", kAudio | kVideo | Bit(Kind::Pdf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
         { L"to.m4a", WheelKind::Convert, L"M4A", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
         { L"to.wav", WheelKind::Convert, L"WAV", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
         { L"to.flac", WheelKind::Convert, L"FLAC", kAudio | kVideo, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },

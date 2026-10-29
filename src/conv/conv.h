@@ -18,6 +18,9 @@ bool MergeWithPdfium(const Job& job, const Progress& p, Result& r); // Merge PDF
 bool RunMedia(const Job& job, const Progress& p, Result& r);       // audio and video, "to.mp4" ... and "media.*"
 bool MediaFrame(const wstring& path, std::vector<uint8_t>& png, wstring& err);   // a still from a video, for previews
 bool FfmpegImage(const wstring& path, std::vector<uint8_t>& png, wstring& err);  // HEIC/AVIF pictures Windows can't read, as PNG
+bool WavToMp3(const wstring& wav, std::vector<uint8_t>& mp3, const Progress& p, wstring& err);   // a spoken WAV, as a small MP3
+// speech.cpp
+bool SpeakToWav(const wstring& text, const wstring& wavPath, const Progress& p, wstring& err);   // Windows' own voice, offline
 struct Image;
 bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err);
 

@@ -229,6 +229,21 @@ bool MediaFrame(const wstring& path, std::vector<uint8_t>& png, wstring& err)
     return true;
 }
 
+bool WavToMp3(const wstring& wav, std::vector<uint8_t>& mp3, const Progress& p, wstring& err)
+{
+    if (GetFileAttributesW(Tool(L"ffmpeg.exe").c_str()) == INVALID_FILE_ATTRIBUTES) { err = L"MP3 needs the Full build (engines\\ffmpeg is missing)."; return false; }
+    wstring out = wav.substr(0, wav.size() - 4) + L".mp3";
+    Run run;
+    // Mono at 64 kbit/s: a voice sounds clean, an hour of it is about 28 MB.
+    bool ok = RunTool(L"ffmpeg.exe", { L"-nostdin", L"-v", L"error", L"-protocol_whitelist", L"file", L"-y", L"-i", L"file:" + wav,
+                                       L"-c:a", L"libmp3lame", L"-b:a", L"64k", L"-ac", L"1", L"-f", L"mp3", L"file:" + out }, run, &p, nullptr) && run.code == 0;
+    wstring readErr;
+    ok = ok && ReadShared(out, mp3, readErr) && !mp3.empty();
+    DeleteFileW(out.c_str());
+    if (!ok) err = L"Could not make the MP3.";
+    return ok;
+}
+
 bool FfmpegImage(const wstring& path, std::vector<uint8_t>& png, wstring& err)
 {
     Run run;

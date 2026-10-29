@@ -461,6 +461,18 @@ bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& 
     }
     Doc doc;
     bool images = target == L"docx" || target == L"epub";
+    if (target == L"mp3") {
+        // Read aloud: the text as for TXT, spoken by Windows' voice, then made an MP3.
+        Progress quiet;   // reading the text is quick next to speaking it
+        if (!ToDoc(pdf, in, false, doc, quiet, r.error)) return false;
+        wstring text = Widen(WriteText(doc));
+        if (text.find_first_not_of(L" \t\r\n") == wstring::npos) { r.error = L"This PDF has no text to read out (it may be scanned pages)."; return false; }
+        wstring wav = JoinPath(TempDir(), L"speech-" + std::to_wstring(GetCurrentProcessId()) + L".wav");
+        std::vector<uint8_t> mp3;
+        bool ok = SpeakToWav(text, wav, p, r.error) && WavToMp3(wav, mp3, p, r.error);
+        DeleteFileW(wav.c_str());
+        return ok && WriteOutput(job, in, base, L".mp3", mp3, p, r);
+    }
     if (!ToDoc(pdf, in, images, doc, p, r.error)) return false;
     std::vector<uint8_t> out;
     std::string text;

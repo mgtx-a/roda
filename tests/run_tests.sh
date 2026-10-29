@@ -244,6 +244,12 @@ if [ -f "$FFDIR/ffmpeg.exe" ]; then
       [ $RC -eq 0 ] && near "$d" "$want" && ok || bad "$f -> $t: rc=$RC duration '$d' (expected $want) $OUT"
     done
   done
+  # PDF read aloud (Windows' voice, then FFmpeg): an MP3 that lasts a few seconds.
+  if [ -f "$(dirname "$EXE")/engines/pdfium.dll" ]; then
+    roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$M/report.mp3")" --op to.mp3
+    d="$(dur "$M/report.mp3")"
+    [ $RC -eq 0 ] && awk -v d="$d" 'BEGIN { exit !(d > 3 && d < 120) }' && ok || bad "PDF to MP3: rc=$RC duration '$d' $OUT"
+  fi
   # AVIF in (photo.avif: photo.jpg as an AV1 still; not made by make_corpus.py, Pillow can't write AVIF).
   convert "$CORPUS/photo.avif" "$M/p-avif.png" --op to.png && { [ "$(field w)x$(field h)" = "640x480" ] && ok || bad "AVIF to PNG: $INFO"; }
   # Copied, not re-encoded, when only the container changes (MKV of VP9+Opus into WebM: identical streams).
