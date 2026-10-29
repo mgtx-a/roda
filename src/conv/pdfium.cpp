@@ -68,11 +68,28 @@ FPDF_FORMHANDLE PdfDoc::form() const
     return form_;
 }
 
-bool RenderPage(const PdfDoc& doc, int index, double dpi, Image& out, wstring& err, int maxSide)
+bool RenderPage(const PdfDoc& doc, int index, double dpi, Image& out, wstring& err, int maxSide, bool text)
 {
     const Pdfium* p = doc.api();
     FPDF_PAGE page = p->FPDF_LoadPage(doc.get(), index);
     if (!page) { err = L"Page " + std::to_wstring(index + 1) + L" can't be read."; return false; }
+    if (!text) {
+        // Taken off this loaded copy of the page only: the file and the next load of the page keep it.
+        std::function<void(FPDF_PAGEOBJECT)> strip = [&](FPDF_PAGEOBJECT form) {
+            for (int i = p->FPDFFormObj_CountObjects(form) - 1; i >= 0; i--) {
+                FPDF_PAGEOBJECT o = p->FPDFFormObj_GetObject(form, unsigned(i));
+                int type = p->FPDFPageObj_GetType(o);
+                if (type == FPDF_PAGEOBJ_TEXT && p->FPDFFormObj_RemoveObject(form, o)) p->FPDFPageObj_Destroy(o);
+                else if (type == FPDF_PAGEOBJ_FORM) strip(o);
+            }
+        };
+        for (int i = p->FPDFPage_CountObjects(page) - 1; i >= 0; i--) {
+            FPDF_PAGEOBJECT o = p->FPDFPage_GetObject(page, i);
+            int type = p->FPDFPageObj_GetType(o);
+            if (type == FPDF_PAGEOBJ_TEXT && p->FPDFPage_RemoveObject(page, o)) p->FPDFPageObj_Destroy(o);
+            else if (type == FPDF_PAGEOBJ_FORM) strip(o);
+        }
+    }
     double wPt = p->FPDF_GetPageWidthF(page), hPt = p->FPDF_GetPageHeightF(page);
     double k = dpi / 72.0;
     if (maxSide > 0) k = std::min(k, maxSide / std::max(1.0, std::max(wPt, hPt)));

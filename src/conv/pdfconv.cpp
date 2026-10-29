@@ -426,12 +426,22 @@ size_t Nearest(const std::vector<double>& edges, double x)
     return k + 1 < edges.size() && edges[k + 1] - x < x - edges[k] ? k + 1 : k;
 }
 
-/// A page as a sheet that looks like it (see PageSheet). The grid's edges are where the page's lines are
-/// and where its pieces of text start, so every piece lands in a cell of its own and the lines become
-/// the cells' borders. Numbers also end on an edge, so they can sit right-aligned where they were.
-PageSheet PageLayout(const Pdfium* p, FPDF_PAGE page)
+/// A piece of text on the page: where (points, y down) and its parts, each in its own style.
+struct Run { double l, r, t, b; wstring text; std::vector<PageSheet::Piece> pieces; };
+
+/// What a page holds, read once: its size, its pieces of text, the lines and boxes drawn, its pictures.
+struct PageContent {
+    double w = 1, h = 1;
+    std::vector<Run> runs;
+    std::vector<Rule> hs, vs, boxes;
+    struct Pic { double x0, y0, x1, y1; Block b; };
+    std::vector<Pic> pics;
+};
+
+/// Reads a page's text (each character once, invisible text left out), lines, boxes and pictures.
+PageContent ReadPage(const Pdfium* p, FPDF_PAGE page)
 {
-    PageSheet sheet;
+    PageContent pc;
     float L = 0, B = 0, R = 0, T = 0;
     if (!p->FPDFPage_GetCropBox(page, &L, &B, &R, &T) && !p->FPDFPage_GetMediaBox(page, &L, &B, &R, &T)) { R = p->FPDF_GetPageWidthF(page); T = p->FPDF_GetPageHeightF(page); }
     // shortcut: the page is read as stored, ignoring /Rotate; a turned page comes out on its side. Turn it when one turns up.
@@ -448,6 +458,9 @@ PageSheet PageLayout(const Pdfium* p, FPDF_PAGE page)
             FS_RECTF box{};
             if (u <= L' ' || u == 0xFFFE || u == 0xA0 || !p->FPDFText_GetLooseCharBox(tp, i, &box)) continue;
             if (Repeated(seen, u, box.left, box.bottom)) continue;
+            // Invisible text (the words found in a scanned page) shows nothing: the scan shows them.
+            FPDF_PAGEOBJECT obj = p->FPDFText_GetTextObject(tp, i);
+            if (obj && p->FPDFTextObj_GetTextRenderMode(obj) == FPDF_TEXTRENDERMODE_INVISIBLE) continue;
             Glyph g;
             g.l = across(box.left); g.r = across(box.right); g.t = down(box.top); g.b = down(box.bottom);
             g.size = ShownSize(p, tp, i);
@@ -462,9 +475,8 @@ PageSheet PageLayout(const Pdfium* p, FPDF_PAGE page)
     }
 
     // Lines drawn (thin filled bars, or the sides of outlined boxes), shaded boxes and pictures, forms included.
-    std::vector<Rule> hs, vs, boxes;
-    struct Pic { double x0, y0, x1, y1; Block b; };
-    std::vector<Pic> pics;
+    auto &hs = pc.hs, &vs = pc.vs, &boxes = pc.boxes;
+    auto& pics = pc.pics;
     std::function<void(FPDF_PAGEOBJECT, const FS_MATRIX&)> visit = [&](FPDF_PAGEOBJECT obj, const FS_MATRIX& m) {
         int type = p->FPDFPageObj_GetType(obj);
         if (type == FPDF_PAGEOBJ_FORM) {
@@ -485,7 +497,7 @@ PageSheet PageLayout(const Pdfium* p, FPDF_PAGE page)
             x0 = std::min(x0, X); x1 = std::max(x1, X); y0 = std::min(y0, Y); y1 = std::max(y1, Y);
         }
         if (type == FPDF_PAGEOBJ_IMAGE) {
-            Pic pic{ x0, y0, x1, y1, {} };
+            PageContent::Pic pic{ x0, y0, x1, y1, {} };
             if (pics.size() < 500 && ImageBytes(p, obj, pic.b)) pics.push_back(std::move(pic));
             return;
         }
@@ -522,8 +534,7 @@ PageSheet PageLayout(const Pdfium* p, FPDF_PAGE page)
     }
 
     // Pieces of text: a gap wider than about a letter, or a line drawn between, starts a new piece.
-    struct Run { double l, r, t, b; wstring text; std::vector<PageSheet::Piece> pieces; };
-    std::vector<Run> runs;
+    auto& runs = pc.runs;
     auto ruleBetween = [&](double a, double c, double t, double b) {
         for (auto& v : vs) if (v.x0 > a && v.x0 < c && v.y0 < b && v.y1 > t) return true;
         return false;
@@ -544,6 +555,20 @@ PageSheet PageLayout(const Pdfium* p, FPDF_PAGE page)
             else ps.push_back({ add, g.font, g.size, g.bold, g.italic, g.color });
         }
     }
+    pc.w = std::max(1.0, double(R - L));
+    pc.h = std::max(1.0, double(T - B));
+    return pc;
+}
+
+/// A page as a sheet that looks like it (see PageSheet). The grid's edges are where the page's lines are
+/// and where its pieces of text start, so every piece lands in a cell of its own and the lines become
+/// the cells' borders. Numbers also end on an edge, so they can sit right-aligned where they were.
+PageSheet PageLayout(PageContent pc)
+{
+    PageSheet sheet;
+    auto &runs = pc.runs;
+    auto &hs = pc.hs, &vs = pc.vs, &boxes = pc.boxes;
+    auto& pics = pc.pics;
     auto numeric = [](const wstring& s) {
         return s.find_first_of(L"0123456789") != wstring::npos && s.find_first_not_of(L"0123456789.,()-%") == wstring::npos;
     };
@@ -551,7 +576,7 @@ PageSheet PageLayout(const Pdfium* p, FPDF_PAGE page)
     // The grid: every line drawn, every piece of text's top and bottom. A piece that crosses a row edge (a
     // ":" centred beside a label and its translation, a big word beside small ones) spans those rows.
     const double tolX = 2, tolY = 1.5;
-    double pageW = std::max(1.0, double(R - L)), pageH = std::max(1.0, double(T - B));
+    double pageW = pc.w, pageH = pc.h;
     std::vector<double> xs{ 0 }, ys{ 0 };
     for (auto& h : hs) { xs.push_back(h.x0); xs.push_back(h.x1); ys.push_back(h.y0); }
     for (auto& v : vs) { xs.push_back(v.x0); ys.push_back(v.y0); ys.push_back(v.y1); }
@@ -1049,7 +1074,7 @@ bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& 
         for (int i = 0; i < pages; i++) {
             FPDF_PAGE page = pdf.api()->FPDF_LoadPage(pdf.get(), i);
             if (!page) continue;
-            sheets.push_back(PageLayout(pdf.api(), page));
+            sheets.push_back(PageLayout(ReadPage(pdf.api(), page)));
             pdf.api()->FPDF_ClosePage(page);
             text = text || !sheets.back().texts.empty();
             p.Set(0.9 * (i + 1) / pages);
@@ -1071,8 +1096,42 @@ bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& 
         if (!WritePptx(slides, out, r.error)) return false;
         return WriteOutput(job, in, base, L".pptx", out, p, r);
     }
+    if (target == L"docx") {
+        // Every page laid out like it: its drawing behind, its text typed over it where it was.
+        std::vector<LaidPage> laid;
+        for (int i = 0; i < pages; i++) {
+            FPDF_PAGE page = pdf.api()->FPDF_LoadPage(pdf.get(), i);
+            if (!page) continue;
+            PageContent pc = ReadPage(pdf.api(), page);
+            pdf.api()->FPDF_ClosePage(page);
+            LaidPage lp;
+            lp.w = pc.w;
+            lp.h = pc.h;
+            for (auto& run : pc.runs) lp.texts.push_back({ run.l, run.t, run.b - run.t, std::move(run.pieces) });
+            Image img;
+            if (!RenderPage(pdf, i, 200, img, r.error, 0, false)) return false;
+            // The paper is see-through, the drawing on it isn't: in Word's dark mode the page darkens and the
+            // text turns light, but a picture keeps its colours, so white paper would hide the text.
+            // White becomes clear and the edges of lines fade into it (white taken out, not cut out).
+            bool blank = true;   // nothing but text on the page: no picture behind it
+            for (size_t k = 0; k + 3 < img.px.size(); k += 4) {
+                uint8_t* c = &img.px[k];
+                int a = 255 - std::min({ c[0], c[1], c[2] });
+                for (int j = 0; j < 3; j++) c[j] = uint8_t(a ? (c[j] - 255 + a) * 255 / a : 0);
+                c[3] = uint8_t(a);
+                blank = blank && a < 5;
+            }
+            img.alpha = true;
+            if (!blank && !EncodeImage(img, Kind::Png, 0, true, lp.drawing, r.error)) return false;
+            laid.push_back(std::move(lp));
+            p.Set(0.9 * (i + 1) / pages);
+        }
+        std::vector<uint8_t> out;
+        if (!WriteLaidDocx(laid, BaseName(in), out)) { r.error = L"Could not write the Word document."; return false; }
+        return WriteOutput(job, in, base, L".docx", out, p, r);
+    }
     Doc doc;
-    bool images = target == L"docx" || target == L"epub";
+    bool images = target == L"epub";
     if (target == L"mp3") {
         // Read aloud: the text as for TXT, spoken by Windows' voice, then made an MP3.
         Progress quiet;   // reading the text is quick next to speaking it

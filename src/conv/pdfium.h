@@ -36,7 +36,8 @@ namespace rd {
     X(FORM_SetFocusedAnnot) X(FORM_SelectAllText) X(FORM_ReplaceSelection) X(FORM_ForceToKillFocus) X(FORM_SetIndexSelected) \
     X(FORM_OnLButtonDown) X(FORM_OnLButtonUp) X(FPDF_FFLDraw) X(FPDFText_LoadStandardFont) X(FPDFPageObj_CreateTextObj) X(FPDFText_SetText) X(FPDFFont_Close) \
     X(FPDFText_GetFillColor) X(FPDFPageObj_GetBounds) X(FPDFPageObj_GetMatrix) X(FPDFPageObj_GetFillColor) X(FPDFPageObj_GetStrokeColor) \
-    X(FPDFPath_GetDrawMode) X(FPDFPath_CountSegments)
+    X(FPDFPath_GetDrawMode) X(FPDFPath_CountSegments) X(FPDFText_GetTextObject) X(FPDFTextObj_GetTextRenderMode) \
+    X(FPDFPage_RemoveObject) X(FPDFFormObj_RemoveObject) X(FPDFPageObj_Destroy)
 
 struct Pdfium {
 #define RD_PDFIUM_MEMBER(name) decltype(&::name) name = nullptr;
@@ -66,8 +67,9 @@ private:
     std::vector<uint8_t> bytes_;
 };
 
-/// Renders one page to straight-alpha BGRA (white paper, as a viewer shows it).
-bool RenderPage(const PdfDoc& doc, int index, double dpi, Image& out, wstring& err, int maxSide = 0);
+/// Renders one page to straight-alpha BGRA (white paper, as a viewer shows it). Without `text`, the page's
+/// text is left out: the drawing behind it.
+bool RenderPage(const PdfDoc& doc, int index, double dpi, Image& out, wstring& err, int maxSide = 0, bool text = true);
 /// Saves a document into memory.
 bool SavePdf(const Pdfium* p, FPDF_DOCUMENT doc, std::vector<uint8_t>& out);
 

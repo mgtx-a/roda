@@ -704,7 +704,7 @@ bool WritePageSheets(const std::vector<PageSheet>& pages, std::vector<uint8_t>& 
         for (size_t k = 0; k < pg.pictures.size(); k++) {
             const auto& pic = pg.pictures[k];
             std::string file = "image" + std::to_string(++media) + (pic.ext == L".jpg" ? ".jpeg" : ".png");
-            ok = ok && z.Add("xl/media/" + file, pic.bytes, true);
+            ok = ok && z.Add("xl/media/" + file, pic.bytes);   // compressed: Office refuses the stored entries miniz writes
             std::string rid = "rId" + std::to_string(k + 1), pid = std::to_string(k + 2);
             auto emu = [](double pt) { return std::to_string(std::llround(pt * 12700)); };
             drawingRels += "<Relationship Id=\"" + rid + "\" Type=\"" + rel + "/image\" Target=\"../media/" + file + "\"/>";

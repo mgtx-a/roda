@@ -53,6 +53,15 @@ std::string WriteMarkdown(const Doc& doc);
 std::string WriteText(const Doc& doc);
 bool WriteDocx(const Doc& doc, std::vector<uint8_t>& out);
 bool WriteEpub(const Doc& doc, std::vector<uint8_t>& out);
+/// A PDF page for a DOCX that looks like it: the page's drawing (all but its text) as a picture behind,
+/// and each piece of text typed over it where it was. Points, y down from the page's top.
+struct LaidPage {
+    double w = 595, h = 842;
+    struct Text { double x = 0, y = 0, h = 0; std::vector<PageSheet::Piece> pieces; };
+    std::vector<Text> texts;
+    std::vector<uint8_t> drawing;   // PNG of the page without its text; empty when nothing else is on it
+};
+bool WriteLaidDocx(const std::vector<LaidPage>& pages, const wstring& title, std::vector<uint8_t>& out);
 /// A presentation with one slide per picture, each filling the slide (PDF pages as slides).
 bool WritePptx(const std::vector<Image>& slides, std::vector<uint8_t>& out, wstring& err);
 

@@ -592,6 +592,86 @@ bool WriteDocx(const Doc& doc, std::vector<uint8_t>& out)
     return ok && z.Finish(out);
 }
 
+bool WriteLaidDocx(const std::vector<LaidPage>& pages, const wstring& title, std::vector<uint8_t>& out)
+{
+    const std::string pre = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>";
+    const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    auto twips = [](double pt) { return std::to_string(std::lround(pt * 20)); };
+    auto emu = [](double pt) { return std::to_string(std::llround(pt * 12700)); };
+    // A paragraph one point high, out of the way: holds the page's drawing, or ends its section.
+    const std::string tiny = "<w:spacing w:before=\"0\" w:after=\"0\" w:line=\"20\" w:lineRule=\"exact\"/>";
+    std::string body, rels;
+    ZipOut z;
+    bool ok = true;
+    for (size_t i = 0; i < pages.size(); i++) {
+        const LaidPage& pg = pages[i];
+        std::string n = std::to_string(i + 1);
+        body += "<w:p><w:pPr>" + tiny + "</w:pPr>";
+        if (!pg.drawing.empty()) {
+            // The drawing fills the page, behind the text and locked, so clicking the text edits the text.
+            std::string rid = "rIdP" + n, cx = emu(pg.w), cy = emu(pg.h);
+            ok = ok && z.Add("word/media/page" + n + ".png", pg.drawing);
+            rels += "<Relationship Id=\"" + rid + "\" Type=\"" + rel + "/image\" Target=\"media/page" + n + ".png\"/>";
+            body += "<w:r><w:drawing><wp:anchor distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\" simplePos=\"0\" relativeHeight=\"0\" behindDoc=\"1\" locked=\"1\" layoutInCell=\"1\" allowOverlap=\"1\">"
+                    "<wp:simplePos x=\"0\" y=\"0\"/><wp:positionH relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionH>"
+                    "<wp:positionV relativeFrom=\"page\"><wp:posOffset>0</wp:posOffset></wp:positionV><wp:extent cx=\"" + cx + "\" cy=\"" + cy + "\"/>"
+                    "<wp:effectExtent l=\"0\" t=\"0\" r=\"0\" b=\"0\"/><wp:wrapNone/><wp:docPr id=\"" + n + "\" name=\"Page " + n + "\"/><wp:cNvGraphicFramePr/>"
+                    "<a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"" + n +
+                    "\" name=\"page" + n + ".png\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed=\"" + rid + "\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>"
+                    "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + cx + "\" cy=\"" + cy + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>"
+                    "</pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>";
+        }
+        body += "</w:p>";
+        // Each piece of text in a frame at its place on the page, one line exactly as high as on the page.
+        for (auto& t : pg.texts) {
+            body += "<w:p><w:pPr><w:framePr w:wrap=\"around\" w:hAnchor=\"page\" w:vAnchor=\"page\" w:x=\"" + twips(t.x) + "\" w:y=\"" + twips(t.y) +
+                    "\" w:hSpace=\"0\" w:vSpace=\"0\"/><w:spacing w:before=\"0\" w:after=\"0\" w:line=\"" + twips(std::max(1.0, t.h)) + "\" w:lineRule=\"exact\"/>"
+                    "<w:ind w:left=\"0\" w:right=\"0\"/></w:pPr>";
+            for (auto& p : t.pieces) {
+                std::string font = XmlEscape(p.font.empty() ? L"Arial" : p.font);
+                char color[8];
+                snprintf(color, sizeof color, "%06X", unsigned(p.color & 0xFFFFFF));
+                std::string size = std::to_string(std::max(2L, std::lround(p.size * 2)));   // half points
+                body += "<w:r><w:rPr><w:rFonts w:ascii=\"" + font + "\" w:hAnsi=\"" + font + "\" w:cs=\"" + font + "\"/>" + (p.bold ? "<w:b/>" : "") +
+                        (p.italic ? "<w:i/>" : "") + "<w:color w:val=\"" + color + "\"/><w:sz w:val=\"" + size + "\"/><w:szCs w:val=\"" + size + "\"/></w:rPr>"
+                        "<w:t xml:space=\"preserve\">" + XmlEscape(p.text) + "</w:t></w:r>";
+            }
+            body += "</w:p>";
+        }
+        // The page's own size, no margins: a section per page, as pages may differ.
+        std::string sect = "<w:sectPr><w:pgSz w:w=\"" + twips(pg.w) + "\" w:h=\"" + twips(pg.h) + "\"" + (pg.w > pg.h ? " w:orient=\"landscape\"" : "") +
+                           "/><w:pgMar w:top=\"0\" w:right=\"0\" w:bottom=\"0\" w:left=\"0\" w:header=\"0\" w:footer=\"0\" w:gutter=\"0\"/></w:sectPr>";
+        body += i + 1 < pages.size() ? "<w:p><w:pPr>" + tiny + sect + "</w:pPr></w:p>" : sect;
+    }
+    std::string document = pre + "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" xmlns:r=\"" + rel + "\" "
+        "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" "
+        "xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><w:body>" + body + "</w:body></w:document>";
+    ok = ok && z.Add("[Content_Types].xml", pre + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+                     "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>"
+                     "<Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/>"
+                     "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>"
+                     "<Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>"
+                     "<Override PartName=\"/word/settings.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml\"/>"
+                     "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>")
+         && z.Add("_rels/.rels", pre + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                  "<Relationship Id=\"rId1\" Type=\"" + rel + "/officeDocument\" Target=\"word/document.xml\"/>"
+                  "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>")
+         && z.Add("word/document.xml", document)
+         && z.Add("word/_rels/document.xml.rels", pre + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                  "<Relationship Id=\"rId1\" Type=\"" + rel + "/styles\" Target=\"styles.xml\"/><Relationship Id=\"rId2\" Type=\"" + rel + "/settings\" Target=\"settings.xml\"/>" +
+                  rels + "</Relationships>")
+         // No space around paragraphs unless asked: the frames carry their own.
+         && z.Add("word/styles.xml", pre + "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:docDefaults>"
+                  "<w:rPrDefault><w:rPr><w:rFonts w:ascii=\"Arial\" w:hAnsi=\"Arial\" w:cs=\"Arial\"/><w:sz w:val=\"20\"/></w:rPr></w:rPrDefault>"
+                  "<w:pPrDefault><w:pPr><w:spacing w:before=\"0\" w:after=\"0\"/></w:pPr></w:pPrDefault></w:docDefaults></w:styles>")
+         // Today's Word, not "Compatibility Mode".
+         && z.Add("word/settings.xml", pre + "<w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:compat>"
+                  "<w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>")
+         && z.Add("docProps/core.xml", pre + "<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" "
+                  "xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>" + XmlEscape(title) + "</dc:title><dc:creator>Roda</dc:creator></cp:coreProperties>");
+    return ok && z.Finish(out);
+}
+
 // ---------------------------------------------------------------- EPUB
 
 bool WriteEpub(const Doc& doc, std::vector<uint8_t>& out)
