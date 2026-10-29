@@ -104,7 +104,9 @@ build_vorbis() {
 
 build_opus() {
   local d; d=$(unpack opus-1.5.2.tar.gz opus-1.5.2)
-  (cd "$d" && newer_config && CFLAGS="$OPT" ./configure "${AUTOCONF[@]}" --disable-doc --disable-extra-programs \
+  # Windows on ARM can't ask the CPU what it has at run time; every such CPU has NEON anyway.
+  local rtcd=(); [ "$ARCH" = arm64 ] && rtcd=(--disable-rtcd)
+  (cd "$d" && newer_config && CFLAGS="$OPT" ./configure "${AUTOCONF[@]}" "${rtcd[@]}" --disable-doc --disable-extra-programs \
    && make -j"$JOBS" && make install)
 }
 
@@ -150,7 +152,8 @@ EOF
 
 # ---------------------------------------------------------------- FFmpeg itself
 # What Roda asks of it (src/conv/media.cpp, src/conv/image.cpp). Decoding is broad: anything a person
-# might drop. Encoding is exactly the encoders Roda names.
+# might drop. Encoding is exactly the encoders Roda names. d3d11va only because the Media Foundation
+# encoder (h264_mf) is written against it; Windows has Direct3D 11 itself.
 ENCODERS="libmp3lame aac flac libopus libvorbis wmav2 pcm_s16le pcm_s16be h264_mf libvpx_vp9 libaom_av1 mpeg4 wmv2 gif png"
 DECODERS="h264 hevc mpeg4 msmpeg4v1 msmpeg4v2 msmpeg4v3 mpeg1video mpeg2video mjpeg mjpegb vp8 vp9 libdav1d theora
   wmv1 wmv2 wmv3 vc1 h263 flv prores dnxhd dvvideo png gif webp bmp rawvideo svq3 cinepak
@@ -172,7 +175,7 @@ build_ffmpeg() {
       --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" \
       --enable-shared --disable-static --disable-debug --disable-doc --disable-ffplay --disable-avdevice \
       --disable-everything --disable-autodetect --disable-network \
-      --enable-w32threads --enable-mediafoundation --enable-zlib \
+      --enable-w32threads --enable-mediafoundation --enable-d3d11va --enable-zlib \
       --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libaom --enable-libdav1d \
       --enable-protocol=file --enable-protocol=pipe --enable-bsfs \
       $(list encoder "$ENCODERS") $(list decoder "$DECODERS") $(list demuxer "$DEMUXERS") \
