@@ -41,7 +41,7 @@ their DLLs; Roda runs them from a worker for audio and video only; without them 
 
 Built in CI on Linux with llvm-mingw 20261006 (`5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4`).
 It contains only the encoders, formats and filters Roda uses (decoding is broad), and no network code
-at all (`--disable-network`, protocols `file` and `pipe` only). About 14 MB on x64, 9 MB on ARM64.
+at all (`--disable-network`, protocols `file` and `pipe` only). About 13.4 MB on x64, 9.5 MB on ARM64.
 
 LGPL: the DLLs are separate files that anyone may replace with their own build of the same FFmpeg
 version; `tools/ffmpeg/build.sh` rebuilds them exactly from the sources above. The licence texts ship in
