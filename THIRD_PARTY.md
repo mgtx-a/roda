@@ -30,14 +30,23 @@ their DLLs; Roda runs them from a worker for audio and video only; without them 
 
 | Component | Version | Licence | Source (archive SHA-256) |
 |---|---|---|---|
-| FFmpeg, LGPL shared build by BtbN/FFmpeg-Builds | n8.1.3-9-g29e619e767 (autobuild-2026-09-30-13-08) | LGPL-3.0-or-later (built with `--enable-version3`, no GPL parts); its libraries (libmp3lame LGPL, libopus/libvorbis/libvpx/libwebp BSD, dav1d BSD, …) under their own licences | https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-09-30-13-08 — x64 `3e47bda1607740550141e37c0e49d1e5182b34699f15adfd137ee266d346811a`, ARM64 `7674d11915c95c8f65eeec36b329917c3023f6bae5786549cc47aed52cc1cea7` |
+| FFmpeg, our own trimmed shared build (`tools/ffmpeg/build.sh`) | 8.1.3 | LGPL-2.1-or-later (no `--enable-gpl`, no `--enable-nonfree`) | https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz `7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3` |
+| LAME (MP3 encoder, inside avcodec) | 3.100 | LGPL-2.0-or-later | https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz `ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e` |
+| Opus | 1.5.2 | BSD-3-Clause | https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz `65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1` |
+| libogg | 1.3.5 | BSD-3-Clause | https://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.xz `c4d91be36fc8e54deae7575241e03f4211eb102afb3fc0775fbbc1b740016705` |
+| libvorbis | 1.3.7 | BSD-3-Clause | https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.xz `b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b` |
+| libvpx (VP9 encoder) | 1.16.0 | BSD-3-Clause + patent grant | https://github.com/webmproject/libvpx/archive/refs/tags/v1.16.0.tar.gz `7a479a3c66b9f5d5542a4c6a1b7d3768a983b1e5c14c60a9396edc9b649e015c` |
+| libaom (AV1 encoder, AVIF) | 3.15.1 | BSD-2-Clause + AOM patent licence | https://storage.googleapis.com/aom-releases/libaom-3.15.1.tar.gz `8ca0c52746174603500f0adb6f2a215d69c9ca2aab2acb3caa06fb791d8d01bf` |
+| dav1d (AV1 decoder) | 1.5.3 | BSD-2-Clause | https://github.com/videolan/dav1d/archive/refs/tags/1.5.3.tar.gz `cbe212b02faf8c6eed5b6d55ef8a6e363aaab83f15112e960701a9c3df813686` |
+| zlib | 1.3.1 | zlib | https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz `9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23` |
+
+Built in CI on Linux with llvm-mingw 20261006 (`5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4`).
+It contains only the encoders, formats and filters Roda uses (decoding is broad), and no network code
+at all (`--disable-network`, protocols `file` and `pipe` only). About 24 MB on x64, 16.5 MB on ARM64.
 
 LGPL: the DLLs are separate files that anyone may replace with their own build of the same FFmpeg
-version; the FFmpeg source is at https://ffmpeg.org/ (git tag `n8.1.3`), and the exact build scripts
-at https://github.com/BtbN/FFmpeg-Builds. The licence text is in [`licenses/ffmpeg/`](licenses/ffmpeg).
-This development build is large (~180 MB) and includes features Roda never uses (network protocols,
-hardware devices): Roda only lets it read and write local files (`-protocol_whitelist file,pipe`). A
-trimmed build made in CI, with only what Roda needs, is planned to replace it.
+version; `tools/ffmpeg/build.sh` rebuilds them exactly from the sources above. The licence texts ship in
+`engines\ffmpeg\licenses\` and are in [`licenses/ffmpeg/`](licenses/ffmpeg).
 
 \* Shortened; full hashes:
 - libwebp: `668c9aba45565e24c27e17f7aaf7060a399f7f31dba6c97a044e1feacb930f37`

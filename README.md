@@ -12,8 +12,7 @@ converted or acted on, locally.
 Not released yet (builds from every push are under the repository's Actions tab). Two builds, for x64 and ARM64, neither needing an installer, admin rights or a runtime:
 
 - **Full** (a zip): `Roda.exe` plus `engines\pdfium.dll` for PDFs and `engines\ffmpeg\` for audio and
-  video. Unzip it anywhere, including a USB stick; delete the folder to remove it. For now it is large
-  (about 75 MB zipped) because the FFmpeg inside is a general-purpose build; a trimmed one is planned.
+  video. Unzip it anywhere, including a USB stick; delete the folder to remove it. About 30 MB unzipped.
 - **Lite**: `Roda.exe` alone (under 2 MB), everything except PDFs, audio and video (those options are
   simply not shown).
 
@@ -119,7 +118,7 @@ What it touches:
   the original, or in `outputFolder` if you set one. Copy to / Move to use Explorer's own file engine.
   PDFs are read by `engines\pdfium.dll`, which only workers load, by its full path, when a PDF is opened.
   Audio and video are converted by `engines\ffmpeg\ffmpeg.exe`, started by a worker and only allowed to
-  read and write local files (no network); cancelling a job ends it.
+  read and write local files; it is built without any network code. Cancelling a job ends it.
 - **Microsoft Office** (only for "to PDF" of Office files, only if installed): the worker starts Word,
   Excel or PowerPoint invisibly, opens the file read-only, saves the PDF and closes it. It quits Office
   afterwards unless other files are open in it; cancelling the job ends an Office it started. Whether
