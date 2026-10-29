@@ -1,146 +1,125 @@
 # Roda
 
-Roda (Malay for "wheel") is a portable, offline file converter for Windows 10 and 11. Drag a file, hold
-Shift, Ctrl or Alt, and a wheel of options opens under the pointer. Drop the file on an option and it is
-converted or acted on, locally.
+Roda (Malay for "wheel") changes files from one type to another on your Windows PC. Photo to PDF,
+video to MP4, Word to PDF, and many more.
 
-> **Status: Phase 6, awaiting hand-tests.** Pictures, PDFs, documents, spreadsheets, subtitles, audio,
-> video, archives and file actions work; there is a Settings window, a first-run tour, an optional
-> right-click entry in Explorer, and files can come straight out of ZIPs and Outlook mails.
+You drag a file, press a key, and a wheel of choices pops up under your mouse. Drop the file on a
+choice and Roda does the rest. Everything happens on your own computer: nothing is uploaded.
 
-## Download
-Not released yet (builds from every push are under the repository's Actions tab). Two builds, for x64 and ARM64, neither needing an installer, admin rights or a runtime:
+Works on Windows 10 and 11. No installing, no admin rights, no account.
 
-- **Full** (a zip): `Roda.exe` plus `engines\pdfium.dll` for PDFs and `engines\ffmpeg\` for audio and
-  video. Unzip it anywhere, including a USB stick; delete the folder to remove it. About 30 MB unzipped.
-- **Lite**: `Roda.exe` alone (under 2 MB), everything except PDFs, audio and video (those options are
-  simply not shown).
+> Roda is still being tested and has no official release yet.
 
-## How to use
-1. Start `Roda.exe`. A wheel icon appears in the tray.
-2. Start dragging one or more files (from Explorer, the desktop, a browser's downloads, ...).
-3. While dragging, press **Shift** (Convert), **Ctrl** (Tools) or **Alt** (Actions). The wheel opens.
-   Pressing another of these keys switches wheels. The dots in the centre show which one is open.
-4. Release the mouse button on an option. To cancel, press **Esc**, drop on the centre of the wheel, or
-   release outside the wheel (the files then go wherever you dropped them, as usual).
-5. A card in the bottom-right corner shows the progress, then **Saved as photo.webp** with **Open** and
-   **Show in folder**. Click the cross on a running card to cancel it. Failures say what went wrong.
+## Get it
+There are two versions:
 
-Files inside a ZIP opened in Explorer, and Outlook attachments, can be dragged straight onto the wheel:
-Roda copies them out first. Their results go to the output folder you chose, or to Downloads.
+- **Full** (a zip, about 30 MB): does everything, including PDFs, audio and video.
+- **Lite** (one file, under 2 MB): everything except PDFs, audio and video.
 
-Or switch on **Right-click in Explorer** in Settings: files and folders then get a "Roda…" entry (on
-Windows 11 under *Show more options*) that opens the wheel for the selection.
+Unzip it anywhere you like, even a USB stick, and double-click `Roda.exe`. To remove Roda, just delete
+the folder.
 
-Without dragging: select files in Explorer or on the desktop and press **Ctrl+Alt+R**. The wheel opens
-with the keyboard in charge: arrows choose, **Tab** switches wheel, **Enter** applies, **Esc** cancels.
+Until the first release, test builds are on the repository's **Actions** tab.
 
-Keys you already hold when the drag starts (Shift+drag to move, say) don't open the wheel: press the key
-once the drag is under way. The wheel doesn't open while a full screen app (a game, a video, a
-presentation) is in front.
+## How to use it
+1. Double-click `Roda.exe`. A small wheel icon appears near the clock.
+2. Start dragging a file, as if you were moving it.
+3. While still holding the mouse button, press one of these keys:
+   - **Shift**: change the file type (Convert)
+   - **Ctrl**: edit the file: smaller, resized, cropped, rotated... (Tools)
+   - **Alt**: copy, move, zip, and so on (Actions)
+4. A wheel opens. Let go of the mouse on the choice you want.
+5. A small card in the bottom-right corner shows the progress. When it's done, click **Open** or
+   **Show in folder**.
 
-### What's on the wheels
-Only the options that work for **every** dropped item are shown; folders and mixed selections get the
-Actions wheel.
+The new file is saved next to the original, with the same name: `photo.jpg` becomes `photo.png`.
+**Your original file is never changed.**
 
-- **Convert** (pictures): JPG, PNG, WEBP, PDF, TIFF, BMP, ICO, and AVIF (Full build; transparency
-  becomes white for now). Reads JPG, PNG, WebP, GIF (first frame), BMP, TIFF (first page), ICO, SVG,
-  HEIC and AVIF (through Windows when Microsoft's extensions are installed, otherwise through the Full
-  build's FFmpeg).
-- **Tools** (pictures): Compress (a quality slider), 50%, 1920 px, 1080 px, Size… (width/height),
-  Crop (drag a rectangle; free, 1:1, 4:3, 16:9), Rotate, Flip, Strip info, Merge PDF.
-  Archives (ZIP, TAR, TAR.GZ, GZ): Extract, into a new folder named after the archive.
-- **PDFs** (Full build). Convert: PNG and JPG (every page at 300 DPI: one file for a one-page PDF,
-  otherwise a folder named after the PDF), TXT, MD (headings, lists, bold and italic recovered from the
-  fonts), DOCX (the text, plus the PDF's pictures), EPUB, PPTX (one slide per page, as a picture).
-  Tools: Split (a PDF per page), Images (the pictures inside, JPEGs as they are), Rotate (every page a
-  quarter turn), Merge PDF (PDFs and pictures, in the order dropped). Float shows the first page.
-- **Documents**: DOCX → HTML, MD, TXT, EPUB. Markdown → HTML, DOCX, TXT, EPUB. HTML → MD, TXT, DOCX.
-  RTF → TXT, HTML, MD, DOCX. TXT → DOCX, EPUB, HTML. Headings, paragraphs, bold, italic, links, lists,
-  tables, quotes, code and pictures carry over where both formats have them.
-- **Spreadsheets**: XLSX, ODS, CSV, TSV and old XLS → XLSX, ODS, CSV, TSV. Values travel (text, numbers,
-  true/false, dates; formulas as their last result), formatting doesn't. Every sheet is kept; to CSV or
-  TSV each sheet becomes its own file in a folder when there are several. CSVs with semicolons (as Excel
-  writes them in many countries) are recognised. CSV comes out as UTF-8 with the mark Excel needs.
-- **Subtitles**: SRT ↔ VTT, both → TXT (just the words).
-- **Audio** (Full build): MP3, M4A (AAC), WAV, FLAC, OGG, Opus, AIFF and WMA into each other. A
-  video's sound can become any of them too. Tools: Trim (start and end, like `1:30`), Compress (a lower
-  bitrate; WAV, FLAC and AIFF become AAC), Join (several files one after another, in the order dropped).
-- **Video** (Full build): MP4, MOV, MKV, WebM, AVI and WMV into each other, and into GIF; a GIF into
-  MP4 or WebM. When only the container changes and the streams fit (MKV to MP4 with H.264, say), they
-  are copied untouched: fast and lossless. Otherwise MP4/MOV/MKV get H.264 (Windows' own encoder;
-  MPEG-4 on Windows editions without it), WebM gets VP9 and Opus. Tools: Trim, Compress (about half the
-  bitrate), Audio only, Mute, 1080p / 720p / 480p, Crop (on a still from the video). Float shows a still.
-- **Office files to PDF**, when Microsoft Office is installed: Word (DOCX, DOC, RTF), Excel (XLSX, XLS,
-  ODS) and PowerPoint (PPTX, PPT) make the PDF themselves, so it looks exactly as in Office. Office runs
-  hidden and opens the file read-only; the option doesn't appear on PCs without that Office app.
-- **Actions** (anything): Copy to…, Move to… (with Explorer's own progress, conflict questions and
-  undo), the last three "Copy to" folders, Copy path, Terminal, Float (a picture or a PDF's first page
-  that stays on top: drag to move, mouse wheel or corners to resize, double-click to open, Esc to
-  close), ZIP, TAR.GZ, TAR.
+To cancel: press **Esc**, or let go in the middle of the wheel. To stop a job that's running, click the
+**×** on its card.
 
-Results go next to the original, under a new name (`photo.webp`, `photo (1).webp`, `photo compressed.jpg`,
-...). The original is never changed or replaced. Unfinished results are written as `*.part` and only
-renamed when complete, so a cancelled or failed job leaves nothing behind.
+The first time you start Roda, a short tour shows you how it works.
 
-Good to know:
-- WebP from PNG, GIF, BMP, ICO or SVG is lossless; from photos it is lossy (quality 82).
-- Photo metadata (EXIF, colour profile) is kept when a JPEG stays a JPEG (Compress, resize, rotate...)
-  unless `keepMetadata` is off; other conversions drop it. **Strip info** removes it from JPEG, PNG and
-  WebP without re-encoding the picture.
-- Pictures stored sideways (EXIF orientation) come out upright.
-- **Settings** (tray → *Settings…*, or start `Roda.exe` again while it runs): the three wheel keys,
-  the hotkey (click it and press the new keys), where results go (next to each file or one folder),
-  JPEG and WebP quality, PDF pages as pictures (150/300/600 DPI), photo info kept or removed, the look
-  (as Windows, light, dark), Start with Windows and the right-click entry. Changes apply at once. They live in `settings.json`.
-- **The tour** shows on the first start and walks through a first conversion; tray → *Take the tour*
-  shows it again.
+### Other ways to open the wheel
+- **Keyboard:** select files in File Explorer and press **Ctrl+Alt+R**. Use the arrow keys to choose,
+  **Enter** to go, **Esc** to cancel.
+- **Right-click:** turn on *Right-click in Explorer* in Settings. Files then get a **Roda…** item when
+  you right-click them. (On Windows 11, it's under *Show more options*.)
+- **From a ZIP or an Outlook email:** drag a file straight out of an open ZIP folder or an email.
+  The result is saved in your **Downloads** folder.
 
-Known limits: a drag from an app running as administrator can't open the wheel (Windows does not let a
-normal app receive drops from an elevated one); don't run Roda as administrator to get around it.
-A PDF made of scanned pages has no text to extract (no OCR); password-protected PDFs are refused with a
-plain message. Not yet: touch and pen dragging (needs a device to test on), other languages, RAR extraction, HEIC output, transparent AVIF, Share, PDF to XLSX, PDF compression, DOCX →
-PDF without Office installed, joining videos, a still from a video as a picture.
+### Tips
+- Press the key **after** you start dragging, not before.
+- The wheel only shows choices that work for the files you're dragging.
+- The wheel won't pop up while a game or full-screen video is in front.
 
-## Privacy & permissions
-Roda makes **no network connections**: no telemetry, no update checks, nothing is uploaded.
-What it touches:
+## What it can do
 
-- **Mouse:** raw mouse input (button and movement) is used to notice that a drag has started. Roda does
-  **not** install keyboard or mouse hooks.
-- **Other windows:** when a drag starts, Roda asks Windows which window holds the mouse capture (its class
-  and program name go in the log), and whether a full screen app is in front, in which case it stays out
-  of the way. For the hotkey it asks the Explorer window in front which files are selected.
-- **Keys:** Shift, Ctrl, Alt and Esc are read only while a file drag is in progress; the hotkey is
-  registered with Windows (`RegisterHotKey`).
-- **Files you drop:** read to convert them, by a separate `Roda.exe --worker` process per job (at
-  below-normal priority), so a damaged file can only stop its own worker. Results are written next to
-  the original, or in `outputFolder` if you set one. Copy to / Move to use Explorer's own file engine.
-  PDFs are read by `engines\pdfium.dll`, which only workers load, by its full path, when a PDF is opened.
-  Audio and video are converted by `engines\ffmpeg\ffmpeg.exe`, started by a worker and only allowed to
-  read and write local files; it is built without any network code. Cancelling a job ends it.
-- **Microsoft Office** (only for "to PDF" of Office files, only if installed): the worker starts Word,
-  Excel or PowerPoint invisibly, opens the file read-only, saves the PDF and closes it. It quits Office
-  afterwards unless other files are open in it; cancelling the job ends an Office it started. Whether
-  Office is installed is read from the registry (nothing is written).
-- **Clipboard:** written only by *Copy path*.
-- **Programs started:** Windows Terminal (or Command Prompt) for *Terminal*; the default app for a result
-  when you click *Open*; Explorer for *Show in folder*.
-- **Settings and log:** `settings.json` and `log.txt` (kept under 200 KB) in a `data` folder next to
-  `Roda.exe`, or in `%APPDATA%\Roda` if that folder is read-only. The log says which.
-- **Temporary files:** `%TEMP%\Roda\<process id>` (previews for Float and Crop), deleted on exit and
-  cleaned up at the next start.
-- **Start with Windows** (tray menu): a `Roda.lnk` shortcut in your Startup folder, removed when you
-  untick it.
-- **Registry:** nothing is written, except the optional right-click entry when you switch it on in
-  Settings (`HKEY_CURRENT_USER\Software\Classes\*\shell\Roda` and `...\Directory\shell\Roda`);
-  switching it off removes both. Read only: the light/dark theme, and whether Word, Excel and
-  PowerPoint are installed.
-- **Dragged-out files:** files from ZIPs opened in Explorer or from Outlook are copied to
-  `%TEMP%\Roda\<process id>` during the drop, and deleted when Roda quits.
+| Files | Change into | Tools |
+|---|---|---|
+| **Photos** (JPG, PNG, WebP, GIF, BMP, TIFF, ICO, SVG, HEIC, AVIF) | JPG, PNG, WebP, PDF, TIFF, BMP, ICO, AVIF | Make smaller, resize, crop, rotate, flip, remove photo info, join into one PDF |
+| **PDFs** \* | Pictures (PNG, JPG), text, Word (DOCX), ebook (EPUB), PowerPoint (PPTX) | Split into pages, take out the pictures, rotate, join PDFs |
+| **Documents** (Word DOCX, Markdown, HTML, RTF, TXT) | Each other, and ebook (EPUB) | |
+| **Word, Excel, PowerPoint** | PDF (only if Microsoft Office is on your PC) | |
+| **Spreadsheets** (Excel XLSX and XLS, ODS, CSV, TSV) | XLSX, ODS, CSV, TSV | |
+| **Subtitles** (SRT, VTT) | Each other, or plain text | |
+| **Audio** \* (MP3, M4A, WAV, FLAC, OGG, Opus, AIFF, WMA) | Each other | Cut a part, make smaller, join several |
+| **Video** \* (MP4, MOV, MKV, WebM, AVI, WMV, GIF) | Each other, or GIF, or just the sound | Cut a part, make smaller, mute, 1080p / 720p / 480p, crop |
+| **ZIP and TAR files** | | Unpack into a folder |
+| **Anything** | | Copy to, Move to, make a ZIP, copy the file's path, open a terminal here, pin a picture on top of your screen |
 
-## Command line
-For scripts and tests (`start /wait` from cmd, as Roda.exe is a Windows app):
+\* Full version only.
+
+### Settings
+Right-click the wheel icon near the clock and choose **Settings**. There you can change:
+- the keys that open the wheel, and the Ctrl+Alt+R shortcut
+- where new files are saved (next to the original, or always in one folder)
+- picture quality
+- light or dark look
+- start Roda with Windows
+- the right-click item in File Explorer
+
+Changes work straight away.
+
+### Things it can't do (yet)
+- Read text from scanned PDFs, or open password-protected PDFs.
+- Turn Word files into PDF without Microsoft Office.
+- Open RAR files.
+- Keep transparent backgrounds when saving as AVIF (they turn white).
+- Work with touch screens or pens.
+- Other languages besides English.
+- Take files dragged from a program that runs as administrator (Windows blocks this).
+
+## Privacy
+**Roda never connects to the internet.** It has no ads, no tracking and no update checks, and your
+files never leave your computer.
+
+What Roda does on your PC, in plain words:
+
+- **Mouse and keys:** it notices when you start dragging a file, and only then checks for
+  Shift, Ctrl, Alt and Esc. It doesn't record your typing.
+- **Your files:** it reads the files you drop on the wheel and saves the new file next to them (or in
+  the folder you chose). Each job runs as its own small helper process, so one broken file can't crash
+  Roda.
+- **Audio, video and PDFs** are handled by helper files in the `engines` folder (FFmpeg and PDFium).
+  They run on your PC, can only read and write files, and contain no internet code.
+- **Microsoft Office:** for Word/Excel/PowerPoint to PDF, Roda asks your own Office to do it, hidden in
+  the background. It opens your file read-only.
+- **Settings and log:** saved in a `data` folder next to `Roda.exe` (or in `%APPDATA%\Roda` if that
+  folder can't be written to). The log is a small text file that says what Roda did.
+- **Temporary files:** previews, and files dragged out of ZIPs or emails, go in `%TEMP%\Roda` and are
+  deleted when Roda closes.
+- **Start with Windows:** if you turn it on, Roda puts a shortcut in your Startup folder. Turning it off
+  removes the shortcut.
+- **Registry:** Roda writes nothing there, unless you turn on the right-click item in Settings
+  (`HKEY_CURRENT_USER\Software\Classes\*\shell\Roda` and `...\Directory\shell\Roda`). Turning it off
+  removes it. Roda only reads two things: your light/dark setting, and whether Office is installed.
+- **Clipboard:** only used when you choose *Copy path*.
+
+## For developers
+
+### Command line
+Roda can also convert from a script (use `start /wait` in cmd):
 
     Roda.exe --convert photo.png photo.webp
     Roda.exe --convert a.jpg b.png merged.pdf
@@ -156,21 +135,24 @@ For scripts and tests (`start /wait` from cmd, as Roda.exe is a Windows app):
     Roda.exe --convert video.mp4 clip.mp4 --op media.trim --option start=12 --option end=45
     Roda.exe --info photo.webp
 
-It exits with 0 on success, 1 when the file could not be converted (with an `error:` line), 2 for bad
-arguments.
+It exits with 0 when it worked, 1 when the file couldn't be converted (with an `error:` line), and 2 for
+wrong arguments.
 
-## Build
-Needs Zig 0.17 (C++20, MinGW-style target). The script defaults to the toolchain path on the author's PC;
-set `ZIG=zig` to use the one on your `PATH`.
+### Build
+Needs Zig 0.17. Set `ZIG=zig` to use the one on your `PATH`.
 
     ./build.sh [outdir] [x64|arm64|all]    # -> out/x64/Roda.exe, out/arm64/Roda.exe
     bash tests/run_tests.sh out/x64/Roda.exe
 
-`tests/run_tests.sh` converts every sample in `tests/corpus` (pictures, PDFs, documents, spreadsheets,
-subtitles, archives) to every format and through every tool, and
-checks the results decode again with the right size; broken files must fail cleanly. Trigger self-test:
-`tests/dragtest.cpp` plays real drags with injected input (it moves the pointer); results of the Phase 1
-run are in [tests/phase1-results.md](tests/phase1-results.md).
+The FFmpeg in `engines\ffmpeg` is built separately on Linux by `tools/ffmpeg/build.sh` (GitHub Actions
+does this); `build.sh` fetches it from the latest successful run. `NO_PDFIUM=1` and `NO_FFMPEG=1` make a
+Lite build.
 
-Roda is free software under the [MIT licence](LICENSE). Licences of third-party code: [THIRD_PARTY.md](THIRD_PARTY.md). Portions of this software are copyright
-© The FreeType Project (www.freetype.org). All rights reserved.
+`tests/run_tests.sh` converts every sample in `tests/corpus` to every format and through every tool, and
+checks the results. `tests/dragtest.cpp` tests the wheel with real drags (it moves the mouse); results
+of the first run are in [tests/phase1-results.md](tests/phase1-results.md).
+
+## Licence
+Roda is free software under the [MIT licence](LICENSE). The licences of the code it uses are in
+[THIRD_PARTY.md](THIRD_PARTY.md). Portions of this software are copyright © The FreeType Project
+(www.freetype.org). All rights reserved.
