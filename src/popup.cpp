@@ -58,6 +58,11 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
     origH_ = origH;
     scale_ = ScaleAt(at);
     surf_.SetScale(scale_);
+    whereH_ = where_.empty() ? 0 : 22;
+    hoverPreset_ = -1;
+    // The main button grows to fit its words ("Resize 3 pictures").
+    applyW_ = std::max(kBtnW, double(surf_.MeasureText(apply_.empty() ? L"Compress" : apply_.c_str(), 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) + 28);
+    if (kind != Popup::Size) sizeFields_ = true;
     if (kind == Popup::Crop) {
         pic_ = LoadMips(preview, 2048);
         DeleteFileW(preview.c_str());   // loaded; the temp file isn't needed any more
@@ -66,15 +71,19 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
         double pw = std::max(160.0, origW * k), ph = std::max(120.0, origH * k);
         k = std::min(pw / origW, ph / origH);
         w_ = origW * k + 40;
-        h_ = origH * k + 46 + 12 + 30 + 18;
+        h_ = origH * k + 46 + 12 + 30 + 18 + whereH_;
         w_ = std::max(w_, 380.0);
     } else if (kind == Popup::Order) {
         w_ = 400;
-        h_ = kListTop + names_.size() * RowH() + 10 + kBtnH + 16;
+        h_ = kListTop + names_.size() * RowH() + 10 + kBtnH + 16 + whereH_;
+    } else if (kind == Popup::Size && !sizeFields_) {
+        w_ = 320;
+        h_ = 46 + 30 + 16 + kBtnH + 16 + whereH_;
     } else {
         w_ = 320;
-        h_ = 172;
+        h_ = 172 + (kind == Popup::Size ? FieldsTop() : 0) + whereH_;
     }
+    w_ = std::max(w_, applyW_ + kBtnW + 48);
     int pw = int(std::lround((w_ + 2 * kPad) * scale_)), ph = int(std::lround((h_ + 2 * kPad) * scale_));
     Mon mon = MonitorOf(at);
     int x = std::clamp<int>(at.x - pw / 2, mon.work.left, std::max<int>(mon.work.left, mon.work.right - pw));
@@ -91,6 +100,23 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
     SetForegroundWindow(hwnd_);
     SetFocus(hwnd_);
     Log(L"popup: %s", title.c_str());
+}
+
+void OptionsPopup::SetPresets(std::vector<Preset> presets, bool fields)
+{
+    presets_ = std::move(presets);
+    sizeFields_ = fields || presets_.empty();
+}
+
+void OptionsPopup::SetSummary(const wstring& apply, const wstring& where)
+{
+    apply_ = apply;
+    where_ = where;
+}
+
+double OptionsPopup::CancelX() const
+{
+    return w_ - 20 - kBtnW - (sizeFields_ ? applyW_ + 8 : 0);
 }
 
 void OptionsPopup::ShowOrder(const wstring& title, const std::vector<wstring>& names, POINT at)
@@ -118,6 +144,10 @@ void OptionsPopup::Hide()
 {
     if (!shown_) return;
     shown_ = false;
+    presets_.clear();
+    sizeFields_ = true;
+    apply_.clear();
+    where_.clear();
     ShowWindow(hwnd_, SW_HIDE);
     surf_.Release();
     pic_ = {};
@@ -125,7 +155,7 @@ void OptionsPopup::Hide()
 
 D2D1_RECT_F OptionsPopup::PictureRect() const
 {
-    double k = std::min((w_ - 40) / origW_, (h_ - 46 - 12 - 30 - 18) / origH_);
+    double k = std::min((w_ - 40) / origW_, (h_ - 46 - 12 - 30 - 18 - whereH_) / origH_);
     double pw = origW_ * k, ph = origH_ * k;
     return RectF(kPad + (w_ - pw) / 2, kPad + 46, pw, ph);
 }
@@ -134,17 +164,20 @@ OptionsPopup::Part OptionsPopup::HitTest(double x, double y, int* aspect) const
 {
     double L = kPad, T = kPad;
     double by = T + h_ - 16 - kBtnH;
-    if (In(x, y, L + w_ - 20 - kBtnW, by, kBtnW, kBtnH)) return Part::Apply;
-    if (In(x, y, L + w_ - 20 - 2 * kBtnW - 8, by, kBtnW, kBtnH)) return Part::Cancel;
+    if (sizeFields_ && In(x, y, L + w_ - 20 - applyW_, by, applyW_, kBtnH)) return Part::Apply;
+    if (In(x, y, L + CancelX(), by, kBtnW, kBtnH)) return Part::Cancel;
+    for (size_t i = 0; i < presetX_.size() && kind_ == Popup::Size; i++)
+        if (In(x, y, L + presetX_[i].first, T + 46, presetX_[i].second, 30)) { *aspect = int(i); return Part::Preset; }
     if (kind_ == Popup::Quality && In(x, y, L + 12, T + 60, w_ - 24, 30)) return Part::Slider;
     if (kind_ == Popup::Pages && In(x, y, L + 20, T + 64, w_ - 40, 34)) return Part::Width;
     if (kind_ == Popup::Order && In(x, y, L + 20, T + kListTop, w_ - 40, order_.size() * RowH())) {
         *aspect = int((y - T - kListTop) / RowH());
         return Part::Row;
     }
-    if (kind_ == Popup::Size || kind_ == Popup::Trim) {
-        if (In(x, y, L + 20, T + 64, 124, 34)) return Part::Width;
-        if (In(x, y, L + w_ - 20 - 124, T + 64, 124, 34)) return Part::Height;
+    if ((kind_ == Popup::Size && sizeFields_) || kind_ == Popup::Trim) {
+        double fy = kind_ == Popup::Size ? FieldsTop() : 0;
+        if (In(x, y, L + 20, T + 64 + fy, 124, 34)) return Part::Width;
+        if (In(x, y, L + w_ - 20 - 124, T + 64 + fy, 124, 34)) return Part::Height;
     }
     if (kind_ == Popup::Crop) {
         for (int i = 0; i < 4; i++)
@@ -278,6 +311,14 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             Part p = HitTest(x, y, &a);
             if (p == Part::Width || p == Part::Height) { field_ = p == Part::Width ? 0 : 1; dirty_ = true; RequestFrame(); return 0; }
             if (p == Part::Aspect) { SetAspect(a); dirty_ = true; RequestFrame(); return 0; }
+            if (p == Part::Preset) {
+                // A size from the row: done in one click, by that size's own tool.
+                Json opts = Json::Object().Set(L"op", presets_[size_t(a)].op);
+                auto fn = onApply;
+                Hide();
+                if (fn) fn(opts);
+                return 0;
+            }
             if (p == Part::Row) selected_ = a;
             if (p == Part::Slider || p == Part::Row || (p >= Part::CropMove && p <= Part::CropSW)) {
                 drag_ = p;
@@ -300,9 +341,10 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
         case WM_MOUSEMOVE: {
             auto [x, y] = local(l);
             if (drag_ != Part::None) { Drag(x, y); dirty_ = true; RequestFrame(); return 0; }
-            int a;
+            int a = -1;
             Part p = HitTest(x, y, &a);
-            if (p != hover_) { hover_ = p; dirty_ = true; RequestFrame(); }
+            int preset = p == Part::Preset ? a : -1;
+            if (p != hover_ || preset != hoverPreset_) { hover_ = p; hoverPreset_ = preset; dirty_ = true; RequestFrame(); }
             return 0;
         }
         case WM_LBUTTONUP: {
@@ -323,7 +365,7 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 case Part::CropNW: case Part::CropSE: c = IDC_SIZENWSE; break;
                 case Part::CropNE: case Part::CropSW: c = IDC_SIZENESW; break;
                 case Part::Width: case Part::Height: c = IDC_IBEAM; break;
-                case Part::Apply: case Part::Cancel: case Part::Aspect: case Part::Slider: c = IDC_HAND; break;
+                case Part::Apply: case Part::Cancel: case Part::Aspect: case Part::Slider: case Part::Preset: c = IDC_HAND; break;
                 case Part::Row: c = IDC_SIZENS; break;
                 default: break;
             }
@@ -341,7 +383,7 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 if (m == WM_SYSKEYDOWN || (GetKeyState(VK_CONTROL) & 0x8000)) MoveRow(to);
                 else selected_ = std::clamp(to, 0, int(order_.size()) - 1);
             }
-            if (w == VK_RETURN) { Apply(); return 0; }
+            if (w == VK_RETURN) { if (sizeFields_) Apply(); return 0; }
             if (kind_ == Popup::Quality && (w == VK_LEFT || w == VK_RIGHT)) {
                 int step = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 5;
                 quality_ = std::clamp(quality_ + (w == VK_RIGHT ? step : -step), 1, 100);
@@ -354,7 +396,7 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         case WM_CHAR:
-            if (kind_ == Popup::Size && w >= L'0' && w <= L'9') {
+            if (kind_ == Popup::Size && sizeFields_ && w >= L'0' && w <= L'9') {
                 wstring& f = field_ ? height_ : width_;
                 if (f.size() < 5 && !(f.empty() && w == L'0')) f += wchar_t(w);
                 dirty_ = true;
@@ -395,18 +437,35 @@ void OptionsPopup::Draw()
     rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(L + 0.5, T + 0.5, W - 1, H - 1), 15.5f, 15.5f), surf_.Solid(th.edge), 1);
     surf_.DrawText(title_.c_str(), 14, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(L + 20, T + 16, W - 40, 22), th.text);
 
-    auto button = [&](float x, float y, const wchar_t* label, bool primary, bool hot) {
+    auto button = [&](float x, float y, float bw, const wchar_t* label, bool primary, bool hot) {
         uint32_t bg = primary ? th.accent : th.button;
         if (hot) bg = primary ? WithAlpha(th.accent, 0.85) : WithAlpha(th.button, 0.7);
-        rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(x, y, kBtnW, kBtnH), 8, 8), surf_.Solid(bg));
+        rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(x, y, bw, kBtnH), 8, 8), surf_.Solid(bg));
         float tw = surf_.MeasureText(label, 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-        surf_.DrawText(label, 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(x + (kBtnW - tw) / 2, y + 6.5, tw + 4, 18), primary ? th.accentText : th.text);
+        surf_.DrawText(label, 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(x + (bw - tw) / 2, y + 6.5, tw + 4, 18), primary ? th.accentText : th.text);
     };
     float by = T + H - 16 - float(kBtnH);
     const wchar_t* verb = kind_ == Popup::Quality ? L"Compress" : kind_ == Popup::Size ? L"Resize" : kind_ == Popup::Trim ? L"Trim" : kind_ == Popup::Pages ? L"Remove" :
                           kind_ == Popup::Order ? L"Merge" : L"Crop";
-    button(L + W - 20 - float(kBtnW), by, verb, true, hover_ == Part::Apply);
-    button(L + W - 20 - 2 * float(kBtnW) - 8, by, L"Cancel", false, hover_ == Part::Cancel);
+    if (sizeFields_) button(L + W - 20 - float(applyW_), by, float(applyW_), apply_.empty() ? verb : apply_.c_str(), true, hover_ == Part::Apply);
+    button(L + float(CancelX()), by, float(kBtnW), L"Cancel", false, hover_ == Part::Cancel);
+    if (!where_.empty()) {
+        // Where the result goes, so nobody has to hunt for it afterwards.
+        wstring w = Ellipsize(surf_, where_, 11, DWRITE_FONT_WEIGHT_NORMAL, W - 40);
+        surf_.DrawText(w.c_str(), 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by - 22, W - 40, 16), th.dim);
+    }
+    if (kind_ == Popup::Size && !presets_.empty()) {
+        presetX_.clear();
+        float x = 20;
+        for (size_t i = 0; i < presets_.size(); i++) {
+            float pw = surf_.MeasureText(presets_[i].label.c_str(), 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 28;
+            presetX_.push_back({ x, pw });
+            bool hot = hoverPreset_ == int(i);
+            rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(L + x, T + 46, pw, 30), 8, 8), surf_.Solid(hot ? th.accent : WithAlpha(th.accent, 0.16)));
+            surf_.DrawText(presets_[i].label.c_str(), 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(L + x + 14, T + 52.5f, pw, 18), hot ? th.accentText : th.accent);
+            x += pw + 8;
+        }
+    }
 
     if (kind_ == Popup::Quality) {
         wstring v = L"Quality " + std::to_wstring(quality_);
@@ -421,24 +480,25 @@ void OptionsPopup::Draw()
         surf_.DrawText(L"Smaller file", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(x0, y + 16, 120, 16), th.dim);
         float rw = surf_.MeasureText(L"Better picture", 11, DWRITE_FONT_WEIGHT_NORMAL);
         surf_.DrawText(L"Better picture", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(x1 - rw, y + 16, rw + 4, 16), th.dim);
-    } else if (kind_ == Popup::Size || kind_ == Popup::Trim) {
+    } else if ((kind_ == Popup::Size && sizeFields_) || kind_ == Popup::Trim) {
         bool trim = kind_ == Popup::Trim;
+        float Tf = T + (trim ? 0 : float(FieldsTop()));   // below the one-click sizes
         auto field = [&](float x, const wchar_t* caption, const wstring& value, bool active) {
-            surf_.DrawText(caption, 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(x, T + 46, 124, 16), th.dim);
-            rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(x, T + 64, 124, 34), 8, 8), surf_.Solid(th.button));
-            if (active) rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(x + 0.75, T + 64.75, 122.5, 32.5), 7.5f, 7.5f), surf_.Solid(th.accent), 1.5f);
+            surf_.DrawText(caption, 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(x, Tf + 46, 124, 16), th.dim);
+            rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(x, Tf + 64, 124, 34), 8, 8), surf_.Solid(th.button));
+            if (active) rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(x + 0.75, Tf + 64.75, 122.5, 32.5), 7.5f, 7.5f), surf_.Solid(th.accent), 1.5f);
             wstring shown = value.empty() ? (trim ? (caption[0] == L'S' ? L"0:00" : L"the end") : L"auto") : trim ? value : value + L" px";
-            surf_.DrawText(shown.c_str(), 13, DWRITE_FONT_WEIGHT_NORMAL, RectF(x + 12, T + 72, 100, 20), value.empty() ? th.dim : th.text);
+            surf_.DrawText(shown.c_str(), 13, DWRITE_FONT_WEIGHT_NORMAL, RectF(x + 12, Tf + 72, 100, 20), value.empty() ? th.dim : th.text);
             if (active) {
                 float cw = value.empty() ? 0 : surf_.MeasureText(value.c_str(), 13, DWRITE_FONT_WEIGHT_NORMAL);
-                rt->DrawLine(D2D1::Point2F(x + 12 + cw + 1, T + 73), D2D1::Point2F(x + 12 + cw + 1, T + 89), surf_.Solid(th.text), 1);
+                rt->DrawLine(D2D1::Point2F(x + 12 + cw + 1, Tf + 73), D2D1::Point2F(x + 12 + cw + 1, Tf + 89), surf_.Solid(th.text), 1);
             }
         };
-        field(L + 20, trim ? L"Start" : L"Width", width_, field_ == 0);
+        field(L + 20, trim ? L"Start" : presets_.empty() ? L"Width" : L"Or your own width", width_, field_ == 0);
         field(L + W - 20 - 124, trim ? L"End" : L"Height", height_, field_ == 1);
-        surf_.DrawText(trim ? L"–" : L"×", 14, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + W / 2 - 5, T + 71, 12, 20), th.dim);
+        surf_.DrawText(trim ? L"–" : L"×", 14, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + W / 2 - 5, Tf + 71, 12, 20), th.dim);
         surf_.DrawText(trim ? L"Minutes:seconds, like 1:30" : L"Leave one on auto to keep the proportions", 11, DWRITE_FONT_WEIGHT_NORMAL,
-                       RectF(L + 20, T + 104, W - 40, 16), th.dim);
+                       RectF(L + 20, Tf + 104, W - 40, 16), th.dim);
     } else if (kind_ == Popup::Pages) {
         float fw = W - 40;
         surf_.DrawText(L"Pages to remove", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, T + 46, fw, 16), th.dim);
@@ -465,7 +525,7 @@ void OptionsPopup::Draw()
             for (int k = 0; k < 3; k++)   // the grip: three short lines
                 rt->DrawLine(D2D1::Point2F(L + W - 42, y + rh / 2 - 4 + k * 4), D2D1::Point2F(L + W - 30, y + rh / 2 - 4 + k * 4), surf_.Solid(th.dim), 1.2f);
         }
-        surf_.DrawText(L"Drag to reorder, or Alt+↑↓", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by + 8, W - 40 - 2 * float(kBtnW) - 16, 16), th.dim);
+        surf_.DrawText(L"Drag to reorder, or Alt+↑↓", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by + 8, float(CancelX()) - 28, 16), th.dim);
     } else if (kind_ == Popup::Crop) {
         wstring dims = std::to_wstring(int(std::lround(cw_ * origW_))) + L" × " + std::to_wstring(int(std::lround(ch_ * origH_)));
         float dw = surf_.MeasureText(dims.c_str(), 12, DWRITE_FONT_WEIGHT_NORMAL);
@@ -485,7 +545,7 @@ void OptionsPopup::Draw()
             rt->DrawLine(D2D1::Point2F(l, t + (b - t) * i / 3), D2D1::Point2F(r, t + (b - t) * i / 3), surf_.Solid(0x55FFFFFF), 1);
         }
         for (float hx : { l, r }) for (float hy : { t, b }) rt->FillRectangle(D2D1::RectF(hx - 4, hy - 4, hx + 4, hy + 4), surf_.Solid(0xFFFFFFFF));
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 4 && 20 + i * 52 + 48 < CancelX(); i++) {
             float x = L + 20 + i * 52;
             bool on = aspect_ == i;
             rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(x, by, 48, kBtnH), 8, 8), surf_.Solid(on ? WithAlpha(th.accent, 0.18) : th.button));

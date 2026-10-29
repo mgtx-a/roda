@@ -9,7 +9,7 @@ namespace {
 // DIPs.
 constexpr double kW = 330, kH = 74, kGap = 8, kMargin = 16, kPad = 26;   // kPad: room for the shadow
 constexpr int kMaxCards = 6;
-constexpr double kDoneFor = 4.0, kFailedFor = 9.0, kNoteFor = 2.6;
+constexpr double kDoneFor = 6.0, kFailedFor = 9.0, kNoteFor = 2.6;
 
 double WindowW() { return kW + 2 * kPad; }
 double WindowH() { return kMaxCards * (kH + kGap) + 2 * kPad; }

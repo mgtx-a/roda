@@ -28,9 +28,15 @@ Until the first release, test builds are on the repository's **Actions** tab.
    into (Convert). Press **Space** or **Tab** again for the next wheel:
    - **Tools**: edit the file: smaller, resized, cropped, rotated...
    - **Files**: copy, move, zip, and so on
-4. Let go of the mouse on the choice you want.
+
+   The names of the three wheels sit above the wheel, so you can see which one is open. You can also
+   drag onto a name to switch to that wheel.
+4. Let go of the mouse on the choice you want. Some choices, like **Resize…**, **Crop** or **Trim**,
+   then open a small panel to finish. It shows where the result will be saved.
+   **Resize…** has the usual sizes (50%, 1920 px, 1080 px; 1080p, 720p, 480p for videos) as one click.
 5. A small card in the bottom-right corner shows the progress. When it's done, click **Open** or
-   **Show in folder**.
+   **Show in folder**. Missed it? Right-click the wheel icon near the clock and look in **Recent**: your
+   last 10 results are there, with **Open**, **Show in folder**, and why something failed.
 
 The new file is saved next to the original, with the same name: `photo.jpg` becomes `photo.png`.
 **Your original file is never changed.**
@@ -38,7 +44,8 @@ The new file is saved next to the original, with the same name: `photo.jpg` beco
 To cancel: press **Esc**, or let go in the middle of the wheel. To stop a job that's running, click the
 **×** on its card.
 
-The first time you start Roda, a short tour shows you how it works.
+The first time you start Roda, a short tour shows you how it works. It has a **Practice file** button
+that gives you a picture to try it on.
 
 Space is safe: if the wheel doesn't open, the file just drops back where it was. (Shift, Ctrl and Alt
 still open the Convert, Tools and Files wheels too, but Windows also uses them while you drag: a drop
@@ -48,7 +55,9 @@ with Ctrl held makes a copy, with Shift a move, with Alt a shortcut.)
 - **Right-click:** select files and right-click them, then choose **Roda…**. On Windows 11, hold
   **Shift** while you right-click (or choose *Show more options*). You can turn it off in Settings.
 - **Keyboard:** select files in File Explorer and press **Ctrl+Alt+R**. Use the arrow keys to choose,
-  **Tab** for the next wheel, **Enter** to go, **Esc** to cancel.
+  **Tab** for the next wheel, **Enter** to go, **Esc** to cancel. You can also click the wheel's names.
+- **Without dragging at all:** right-click the wheel icon near the clock and choose **Choose files…**.
+  Pick your files, and the wheel opens for them. Click a choice, or a wheel's name to switch.
 - **From a ZIP or an Outlook email:** drag a file straight out of an open ZIP folder or an email.
   The result is saved in your **Downloads** folder.
 
@@ -127,7 +136,7 @@ files never leave your computer.
 What Roda does on your PC, in plain words:
 
 - **Mouse and keys:** it notices when you start dragging a file, and only then checks for
-  Shift, Ctrl, Alt and Esc. It doesn't record your typing.
+  Space, Tab, Shift, Ctrl, Alt and Esc. It doesn't record your typing.
 - **Your files:** it reads the files you drop on the wheel and saves the new file next to them (or in
   the folder you chose). Each job runs as its own small helper process, so one broken file can't crash
   Roda.
@@ -138,14 +147,17 @@ What Roda does on your PC, in plain words:
 - **Microsoft Office:** for Word/Excel/PowerPoint to PDF, Roda asks your own Office to do it, hidden in
   the background. It opens your file read-only.
 - **Settings and log:** saved in a `data` folder next to `Roda.exe` (or in `%APPDATA%\Roda` if that
-  folder can't be written to). The log is a small text file that says what Roda did.
+  folder can't be written to). The log is a small text file that says what Roda did. The tour's
+  practice picture goes in `data\Practice`. The **Recent** list is kept in memory only, and is gone
+  when Roda closes.
 - **Temporary files:** previews, and files dragged out of ZIPs or emails, go in `%TEMP%\Roda` and are
   deleted when Roda closes.
 - **Start with Windows:** if you turn it on, Roda puts a shortcut in your Startup folder. Turning it off
   removes the shortcut.
-- **Registry:** Roda writes nothing there, unless you turn on the right-click item in Settings
-  (`HKEY_CURRENT_USER\Software\Classes\*\shell\Roda` and `...\Directory\shell\Roda`). Turning it off
-  removes it. Roda only reads two things: your light/dark setting, and whether Office is installed.
+- **Registry:** the only thing Roda writes there is its right-click items (**Roda…** and **Merge into
+  one PDF**), under `HKEY_CURRENT_USER\Software\Classes\*\shell\Roda`, `...\Directory\shell\Roda` and
+  `...\SystemFileAssociations\<type>\shell\RodaMerge`. They're on from the first start; turning them off
+  in Settings removes them. Roda only reads two things: your light/dark setting, and whether Office is installed.
 - **Clipboard:** only used when you choose *Copy path*.
 
 ## For developers

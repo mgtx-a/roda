@@ -30,7 +30,7 @@ constexpr UINT_PTR TIMER_MODAL = 99;
 constexpr int HOTKEY_WHEEL = 1;
 constexpr int HOTKEY_MERGE = 2;   // Ctrl+Alt+M: the files selected in Explorer, merged into one PDF
 
-enum Cmd { CmdOutput = 1, CmdPause, CmdStartup, CmdSettings, CmdTour, CmdLog, CmdQuit };
+enum Cmd { CmdOutput = 1, CmdPause, CmdStartup, CmdSettings, CmdTour, CmdLog, CmdQuit, CmdChoose, CmdRecent = 100 };   // CmdRecent: 4 per entry
 
 HWND g_msg = nullptr;
 std::mutex g_uiMutex;
@@ -139,6 +139,8 @@ struct App {
     int choices = 0;   // options chosen so far (the tour watches it)
     std::vector<std::unique_ptr<FloatCard>> floats;
     std::map<int, std::function<void(const JobState&)>> waiting;   // quiet jobs (previews): who wants the result
+    struct Finished { wstring title, what, out, error; bool ok = false; };
+    std::vector<Finished> recent;    // the tray's Recent menu, newest first: results outlive their card
     HINSTANCE inst = nullptr;
     NOTIFYICONDATAW nid{};
     bool trayAdded = false, hotkey = false, mergeHotkey = false, fastTimer = false;
@@ -172,12 +174,20 @@ struct App {
         settingsUi.setStartup = [](bool on) { if (on != StartupOn()) SetStartup(on); };
         settingsUi.explorerMenuOn = [] { return ExplorerMenuOn(); };
         settingsUi.setExplorerMenu = [](bool on) { if (on != ExplorerMenuOn()) SetExplorerMenu(on); };
+        tour.onPractice = [this] { Practice(); };
         tour.onFinished = [this] { if (!settings.welcomed) { settings.welcomed = true; settings.Save(); } };
         // First run: the tour, once things have settled.
         if (!settings.welcomed && !TestMode()) After(1.5, [this] { StartTour(); });
         wheel.onChoose = [this](const WheelOption& o, const std::vector<wstring>& paths, POINT at) { Chosen(o, paths, at); };
         jobs.onChange = [this](const JobState& s) {
-            if (!s.quiet) { cards.Update(s); return; }
+            if (!s.quiet) {
+                cards.Update(s);
+                if (s.phase == JobState::Done || s.phase == JobState::Failed) {
+                    recent.insert(recent.begin(), { s.title, s.what, s.out, s.error, s.phase == JobState::Done });
+                    if (recent.size() > 10) recent.pop_back();
+                }
+                return;
+            }
             if (s.phase != JobState::Done && s.phase != JobState::Failed && s.phase != JobState::Cancelled) return;
             auto it = waiting.find(s.id);
             if (it == waiting.end()) return;
@@ -285,6 +295,34 @@ struct App {
         placeUi.Show(pdf, mode);
     }
 
+    /// "photo.jpg", or "3 pictures" / "3 videos" / "3 files".
+    static wstring Named(const std::vector<wstring>& paths)
+    {
+        if (paths.size() == 1) return FileName(paths[0]);
+        bool images = true, videos = true;
+        for (auto& p : paths) { Kind k = KindFromExtension(p); images = images && IsImage(k); videos = videos && (Bit(k) & kVideo) != 0; }
+        return std::to_wstring(paths.size()) + (images ? L" pictures" : videos ? L" videos" : L" files");
+    }
+
+    /// The popup's main button: what happens, to how many ("Resize 3 pictures").
+    static wstring ApplyLabel(Popup kind, const std::vector<wstring>& paths)
+    {
+        const wchar_t* verb = kind == Popup::Quality ? L"Compress" : kind == Popup::Size ? L"Resize" : kind == Popup::Trim ? L"Trim" :
+                              kind == Popup::Pages ? L"Remove pages" : kind == Popup::Order ? L"Merge into one PDF" : L"Crop";
+        if (paths.size() < 2 || kind == Popup::Order || kind == Popup::Pages) return verb;
+        return wstring(verb) + L" " + Named(paths);
+    }
+
+    /// Where the results will be, said before they're made (the same rule as MakeJob).
+    wstring WhereText(const std::vector<wstring>& paths, bool oneResult) const
+    {
+        if (!settings.outputFolder.empty()) return L"Saved in " + settings.outputFolder;
+        if (!paths.empty() && paths[0].rfind(TempDir(), 0) == 0) return L"Saved in your Downloads folder";
+        wstring folder = paths.empty() ? L"" : FileName(ParentDir(paths[0]));
+        if (oneResult) return L"Saved next to the first file, in " + folder;
+        return paths.size() == 1 ? L"Saved next to the original, in " + folder : L"Saved next to each original";
+    }
+
     std::vector<wstring> opened;     // paths from "Roda…" in Explorer, gathered for a moment
     std::vector<wstring> lastOpened; // the last batch shown, in case more of the same selection arrives
     double lastOpenedAt = -10;
@@ -348,8 +386,14 @@ struct App {
             return;
         }
 
-        // Options first: the popup opens where the wheel was.
+        // Options first: the popup opens where the wheel was. Its button says what and to how many; above it,
+        // where the results will go.
+        popup.SetSummary(ApplyLabel(c->popup, paths), WhereText(paths, c->mode == Converter::AllInOne));
         popup.onApply = [this, o, paths](const Json& opts) {
+            if (opts.has(L"op")) {   // one of Resize's sizes: that size's own tool
+                if (const Converter* sized = FindConverter(opts[L"op"].Str())) Submit({ sized, sized->label, L"", o.icon }, paths, Json::Object());
+                return;
+            }
             if (opts.has(L"q")) { settings.compressQuality = int(opts[L"q"].Num()); settings.Save(); }
             // Merge: the files in the order picked ("2,0,1" names them by where they were).
             std::vector<wstring> ordered;
@@ -364,7 +408,12 @@ struct App {
         };
         wstring title = paths.size() == 1 ? o.label + L" " + FileName(paths[0]) : o.label + L" " + std::to_wstring(paths.size()) + L" pictures";
         if (c->popup == Popup::Quality) popup.Show(Popup::Quality, L"Compress", at, settings.compressQuality);
-        else if (c->popup == Popup::Size) popup.Show(Popup::Size, L"Resize to", at, 0);
+        else if (c->popup == Popup::Size) {
+            // The usual sizes in one click; a picture can also have exact pixels.
+            if (id == L"media.resize") popup.SetPresets({ { L"1080p", L"media.1080" }, { L"720p", L"media.720" }, { L"480p", L"media.480" } }, false);
+            else popup.SetPresets({ { L"50%", L"tool.resize50" }, { L"1920 px", L"tool.resize1920" }, { L"1080 px", L"tool.resize1080" } }, true);
+            popup.Show(Popup::Size, L"Resize " + Named(paths), at, 0);
+        }
         else if (c->popup == Popup::Pages) popup.Show(Popup::Pages, L"Remove pages from " + FileName(paths[0]), at, 0);
         else if (c->popup == Popup::Trim) popup.Show(Popup::Trim, L"Trim " + (paths.size() == 1 ? FileName(paths[0]) : L""), at, 0);
         else if (c->popup == Popup::Order) {
@@ -373,7 +422,11 @@ struct App {
             popup.ShowOrder(L"Merge " + std::to_wstring(paths.size()) + L" files into one PDF", names, at);
         }
         else if (c->popup == Popup::Crop) {
-            Preview(paths[0], 1200, [this, at, title](const wstring& png, int w, int h) { popup.Show(Popup::Crop, title, at, 0, png, w, h); });
+            wstring apply = ApplyLabel(c->popup, paths), where = WhereText(paths, false);
+            Preview(paths[0], 1200, [this, at, title, apply, where](const wstring& png, int w, int h) {
+                popup.SetSummary(apply, where);   // the preview took a moment: say it again, another popup may have cleared it
+                popup.Show(Popup::Crop, title, at, 0, png, w, h);
+            });
         }
     }
 
@@ -448,9 +501,80 @@ struct App {
         trayAdded = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
     }
 
+    /// Files picked in a dialog, then the wheel for them (driven by clicks or keys, like "Roda…" in Explorer).
+    void ChooseFiles()
+    {
+        Com<IFileOpenDialog> dlg;
+        if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dlg.Put())))) return;
+        DWORD o = 0;
+        dlg->GetOptions(&o);
+        dlg->SetOptions(o | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST);
+        dlg->SetTitle(L"Choose files for Roda");
+        dlg->SetOkButtonLabel(L"Choose");
+        BeginModal();
+        HRESULT hr = dlg->Show(nullptr);
+        EndModal();
+        Com<IShellItemArray> items;
+        if (FAILED(hr) || FAILED(dlg->GetResults(items.Put()))) return;
+        DWORD n = 0;
+        items->GetCount(&n);
+        std::vector<wstring> paths;
+        for (DWORD i = 0; i < n; i++) {
+            Com<IShellItem> item;
+            PWSTR p = nullptr;
+            if (SUCCEEDED(items->GetItemAt(i, item.Put())) && SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &p)) && p) paths.push_back(p);
+            CoTaskMemFree(p);
+        }
+        if (paths.empty() || settings.paused) return;
+        Log(L"choose files: %d item(s)", int(paths.size()));
+        wheel.ShowForKeyboard(paths);
+    }
+
+    /// The tour's practice file: a picture in Roda's own folder, shown selected in Explorer, ready to drag.
+    void Practice()
+    {
+        wstring dir = JoinPath(DataDir(), L"Practice"), png = JoinPath(dir, L"Practice picture.png");
+        EnsureDir(dir);
+        if (!FileExists(png) && !DrawPractice(png)) { cards.AnchorAt(CursorPos()); cards.Note(L"Practice file", L"Could not make the practice picture.", true); return; }
+        PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(png.c_str());
+        if (pidl) { SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0); ILFree(pidl); }
+        Log(L"tour: practice file at %s", png.c_str());
+    }
+
+    static bool DrawPractice(const wstring& png)
+    {
+        const UINT w = 1200, h = 800;
+        Com<IWICBitmap> bmp;
+        Com<ID2D1RenderTarget> rt;
+        if (FAILED(Wic()->CreateBitmap(w, h, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, bmp.Put()))) return false;
+        auto props = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+        if (FAILED(D2D()->CreateWicBitmapRenderTarget(bmp.Get(), props, rt.Put()))) return false;
+        Com<ID2D1SolidColorBrush> sky, sun, hill, ink;
+        rt->CreateSolidColorBrush(Argb(0xFF9FD3E6), sky.Put());
+        rt->CreateSolidColorBrush(Argb(0xFFF6C453), sun.Put());
+        rt->CreateSolidColorBrush(Argb(0xFF2E8B6E), hill.Put());
+        rt->CreateSolidColorBrush(Argb(0xFF14302A), ink.Put());
+        rt->BeginDraw();
+        rt->Clear(Argb(0xFF9FD3E6));
+        rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(930, 210), 110, 110), sun.Get());
+        rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(300, 900), 700, 380), hill.Get());
+        rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(1050, 950), 600, 360), hill.Get());
+        const wchar_t* text = L"Drag me, then press Space";
+        if (auto* fmt = TextFormat(64, DWRITE_FONT_WEIGHT_SEMI_BOLD)) rt->DrawText(text, UINT32(wcslen(text)), fmt, D2D1::RectF(80, 320, 1150, 420), ink.Get());
+        if (FAILED(rt->EndDraw())) return false;
+        Com<IWICStream> stream;
+        Com<IWICBitmapEncoder> enc;
+        Com<IWICBitmapFrameEncode> frame;
+        WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppBGRA;
+        return SUCCEEDED(Wic()->CreateStream(stream.Put())) && SUCCEEDED(stream->InitializeFromFilename(png.c_str(), GENERIC_WRITE))
+            && SUCCEEDED(Wic()->CreateEncoder(GUID_ContainerFormatPng, nullptr, enc.Put())) && SUCCEEDED(enc->Initialize(stream.Get(), WICBitmapEncoderNoCache))
+            && SUCCEEDED(enc->CreateNewFrame(frame.Put(), nullptr)) && SUCCEEDED(frame->Initialize(nullptr)) && SUCCEEDED(frame->SetSize(w, h))
+            && SUCCEEDED(frame->SetPixelFormat(&fmt)) && SUCCEEDED(frame->WriteSource(bmp.Get(), nullptr)) && SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit());
+    }
+
     void UpdateTip()
     {
-        wcscpy(nid.szTip, settings.paused ? L"Roda (paused)" : L"Roda: drag a file, then hold Shift, Ctrl or Alt");
+        wcscpy(nid.szTip, settings.paused ? L"Roda (paused)" : L"Roda: drag a file, then press Space");
         if (trayAdded) Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
 
@@ -468,6 +592,21 @@ struct App {
     {
         bool fixedOutput = !settings.outputFolder.empty();
         HMENU m = CreatePopupMenu();
+        AppendMenuW(m, MF_STRING, CmdChoose, L"Choose files…");
+        // Recent: each result with Open and Show in folder, each failure with why.
+        HMENU rec = CreatePopupMenu();
+        for (size_t i = 0; i < recent.size(); i++) {
+            const Finished& d = recent[i];
+            HMENU item = CreatePopupMenu();
+            UINT base = CmdRecent + UINT(i) * 4;
+            if (d.ok) { AppendMenuW(item, MF_STRING, base, L"Open"); AppendMenuW(item, MF_STRING, base + 1, L"Show in folder"); }
+            else AppendMenuW(item, MF_STRING, base + 2, L"Why it failed");
+            wstring label = d.ok ? FileName(d.out) + L"   from " + d.title : L"Failed: " + d.title + L" (" + d.what + L")";
+            for (size_t k = 0; (k = label.find(L'&', k)) != wstring::npos; k += 2) label.insert(k, 1, L'&');   // a plain & in a menu
+            AppendMenuW(rec, MF_POPUP, UINT_PTR(item), label.c_str());
+        }
+        AppendMenuW(m, MF_POPUP | (recent.empty() ? MF_GRAYED : 0), UINT_PTR(rec), L"Recent");
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(m, MF_STRING | (fixedOutput ? 0 : MF_GRAYED), CmdOutput, fixedOutput ? L"Open output folder" : L"Output: next to each file");
         AppendMenuW(m, MF_STRING | (settings.paused ? MF_CHECKED : 0), CmdPause, L"Pause Roda");
         AppendMenuW(m, MF_STRING | (StartupOn() ? MF_CHECKED : 0), CmdStartup, L"Start with Windows");
@@ -483,7 +622,20 @@ struct App {
         int cmd = TrackPopupMenu(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY | TPM_BOTTOMALIGN, p.x, p.y, 0, g_msg, nullptr);
         EndModal();
         DestroyMenu(m);
+        if (cmd >= CmdRecent && size_t(cmd - CmdRecent) / 4 < recent.size()) {
+            const Finished d = recent[size_t(cmd - CmdRecent) / 4];
+            int what = (cmd - CmdRecent) % 4;
+            cards.AnchorAt(CursorPos());
+            if (what < 2 && !FileExists(d.out)) cards.Note(FileName(d.out), L"That file isn't there any more (moved or deleted).", true);
+            else if (what == 0) ShellExecuteW(nullptr, L"open", d.out.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            else if (what == 1) {
+                PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(d.out.c_str());
+                if (pidl) { SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0); ILFree(pidl); }
+            } else cards.Note(d.title, d.error.empty() ? L"It failed without saying why. The log has more." : d.error, true);
+            return;
+        }
         switch (cmd) {
+            case CmdChoose: ChooseFiles(); break;
             case CmdOutput: EnsureDir(settings.outputFolder); ShellExecuteW(nullptr, L"open", settings.outputFolder.c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
             case CmdPause: SetPaused(!settings.paused); break;
             case CmdStartup: SetStartup(!StartupOn()); break;

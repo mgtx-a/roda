@@ -15,6 +15,7 @@ public:
     void End();
     bool active() const { return hwnd_ != nullptr && IsWindowVisible(hwnd_); }
     std::function<void()> onFinished;   // the last card was closed (or the tour skipped)
+    std::function<void()> onPractice;   // "Practice file": a picture to try it on
 
     bool dirty() const { return dirty_; }
     void Draw();
@@ -24,7 +25,7 @@ private:
     LRESULT Handle(UINT m, WPARAM w, LPARAM l);
     void Poll();
     void Next();
-    int HitTest(double x, double y) const;   // 1 end, 2 next
+    int HitTest(double x, double y) const;   // 1 end, 2 next, 3 practice file
 
     HWND hwnd_ = nullptr;
     Surface surf_;

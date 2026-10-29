@@ -6,7 +6,7 @@
 
 namespace rd {
 
-enum class WheelKind { Convert, Tools, Actions };
+enum class WheelKind { Convert, Tools, Actions, Hidden };   // Hidden: no wheel; reached from a panel (Resize's sizes) or the command line
 const wchar_t* WheelName(WheelKind k);
 
 enum class Kind : uint8_t {

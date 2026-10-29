@@ -226,10 +226,11 @@ const std::vector<Converter>& Converters()
 
         // Tools.
         { L"tool.compress",   WheelKind::Tools, L"Compress",    kCompressible, Icon::Compress, C::PerFile, 1, 0, Popup::Quality, RunImageTool },
-        { L"tool.resize50",   WheelKind::Tools, L"50%",         kImages, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunImageTool },
-        { L"tool.resize1920", WheelKind::Tools, L"1920 px",     kImages, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunImageTool },
-        { L"tool.resize1080", WheelKind::Tools, L"1080 px",     kImages, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunImageTool },
-        { L"tool.resize",     WheelKind::Tools, L"Size…",       kImages, Icon::Resize, C::PerFile, 1, 0, Popup::Size, RunImageTool },
+        // One Resize… on the wheel: its panel has the usual sizes as one-click buttons (the Hidden rows).
+        { L"tool.resize50",   WheelKind::Hidden, L"50%",         kImages, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunImageTool },
+        { L"tool.resize1920", WheelKind::Hidden, L"1920 px",     kImages, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunImageTool },
+        { L"tool.resize1080", WheelKind::Hidden, L"1080 px",     kImages, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunImageTool },
+        { L"tool.resize",     WheelKind::Tools, L"Resize…",      kImages, Icon::Resize, C::PerFile, 1, 0, Popup::Size, RunImageTool },
         { L"tool.crop",       WheelKind::Tools, L"Crop",        kImages, Icon::Crop, C::PerFile, 1, 1, Popup::Crop, RunImageTool },
         { L"tool.rotate",     WheelKind::Tools, L"Rotate",      kImages, Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunImageTool },
         { L"tool.flip",       WheelKind::Tools, L"Flip",        kImages, Icon::Flip, C::PerFile, 1, 0, Popup::None, RunImageTool },
@@ -247,9 +248,10 @@ const std::vector<Converter>& Converters()
         { L"media.compress",  WheelKind::Tools, L"Compress",    kAudio | kVideo, Icon::Compress, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
         { L"media.audio",     WheelKind::Tools, L"Audio only",  kVideo, Icon::Audio, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
         { L"media.mute",      WheelKind::Tools, L"Mute",        kVideo, Icon::Mute, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
-        { L"media.1080",      WheelKind::Tools, L"1080p",       kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
-        { L"media.720",       WheelKind::Tools, L"720p",        kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
-        { L"media.480",       WheelKind::Tools, L"480p",        kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
+        { L"media.resize",    WheelKind::Tools, L"Resize…",     kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::Size, RunMedia, Engine::Ffmpeg },
+        { L"media.1080",      WheelKind::Hidden, L"1080p",       kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
+        { L"media.720",       WheelKind::Hidden, L"720p",        kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
+        { L"media.480",       WheelKind::Hidden, L"480p",        kVideo, Icon::Resize, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
         { L"media.crop",      WheelKind::Tools, L"Crop",        kVideo, Icon::Crop, C::PerFile, 1, 1, Popup::Crop, RunMedia, Engine::Ffmpeg },
         { L"media.merge",     WheelKind::Tools, L"Join",        kAudio, Icon::Merge, C::AllInOne, 2, 0, Popup::None, RunMedia, Engine::Ffmpeg },
 

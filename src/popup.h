@@ -17,6 +17,11 @@ public:
 
     /// Opens centred on `at`. For Crop, `preview` is a PNG of the picture and origW/H its real size.
     void Show(Popup kind, const wstring& title, POINT at, int quality, const wstring& preview = L"", int origW = 0, int origH = 0);
+    /// Size: one-click sizes above the fields; each applies with "op", its own tool. Without fields, only these.
+    struct Preset { wstring label, op; };
+    void SetPresets(std::vector<Preset> presets, bool fields);
+    /// Before Show: the main button's words ("Resize 3 pictures") and where results go. Cleared on Hide.
+    void SetSummary(const wstring& apply, const wstring& where);
     /// Merge: the files in a list to put in order; applies with "order", the new order as indexes ("2,0,1").
     void ShowOrder(const wstring& title, const std::vector<wstring>& names, POINT at);
     void Hide();
@@ -29,7 +34,7 @@ public:
     void Draw();
 
 private:
-    enum class Part { None, Slider, Width, Height, Apply, Cancel, CropMove, CropN, CropS, CropE, CropW, CropNE, CropNW, CropSE, CropSW, Aspect, Row };
+    enum class Part { None, Slider, Width, Height, Apply, Cancel, CropMove, CropN, CropS, CropE, CropW, CropNE, CropNW, CropSE, CropSW, Aspect, Row, Preset };
     static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l);
     LRESULT Handle(UINT m, WPARAM w, LPARAM l);
     Part HitTest(double x, double y, int* aspect) const;
@@ -38,6 +43,8 @@ private:
     void SetAspect(int i);
     void MoveRow(int to);
     D2D1_RECT_F PictureRect() const;
+    double CancelX() const;               // DIPs from the card's left
+    double FieldsTop() const { return presets_.empty() ? 0 : 44; }
     double RowH() const { return std::clamp(360.0 / std::max<size_t>(1, names_.size()), 22.0, 34.0); }
 
     HWND hwnd_ = nullptr;
@@ -59,6 +66,12 @@ private:
     std::vector<wstring> names_;             // Merge: the files, as given
     std::vector<size_t> order_;              // Merge: indexes into names_, top to bottom
     int selected_ = 0;                       // Merge: the row picked (by click or arrows)
+    std::vector<Preset> presets_;
+    std::vector<std::pair<double, double>> presetX_;   // left and width of each, DIPs from the card's left
+    bool sizeFields_ = true;
+    wstring apply_, where_;
+    double applyW_ = 92, whereH_ = 0;
+    int hoverPreset_ = -1;
     Part drag_ = Part::None, hover_ = Part::None;
     double dragX_ = 0, dragY_ = 0, startX_ = 0, startY_ = 0, startW_ = 0, startH_ = 0;
 };

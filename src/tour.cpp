@@ -15,11 +15,11 @@ struct Step {
 
 const Step kSteps[] = {
     { L"Drag a file, then press Space", L"Start dragging a picture or a document. While the mouse button is still down, press Space.",
-      L"A wheel of formats opens under the pointer. Space or Tab again: Tools, then Files.", 0 },
+      L"A wheel opens under the pointer. Space again: Tools, then Files. No file to hand? Practice file.", 0 },
     { L"Drop it on a format", L"Move onto a segment and let go. The result is saved next to the original, under a new name.",
       L"A card in the corner shows it, with Open and Show in folder. Esc or the centre cancels.", 1 },
-    { L"You're all set", L"No dragging? Select files and right-click them (Shift + right-click on Windows 11), or press Ctrl + Alt + R.",
-      L"The tray icon has Settings, Pause and \"Take the tour\" to see this again.", 2 },
+    { L"You're all set", L"No dragging? Right-click files and choose Roda… (Shift + right-click on Windows 11), press Ctrl + Alt + R, or",
+      L"use Choose files… in the tray menu. The tray also has Recent, for what you made, and Take the tour.", 2 },
 };
 constexpr int kSteps_ = int(sizeof(kSteps) / sizeof(kSteps[0]));
 constexpr double kW = 580, kH = 168, kPad = 24, kShadow = 24;
@@ -115,6 +115,7 @@ int Tour::HitTest(double x, double y) const
     if (y < kH - kPad - 32 || y > kH - kPad) return 0;
     if (x > kPad && x < kPad + 96) return 1;
     if (x > kW - kPad - 112 && x < kW - kPad) return 2;
+    if (step_ == 0 && x > kPad + 104 && x < kPad + 104 + 124) return 3;
     return 0;
 }
 
@@ -134,6 +135,7 @@ LRESULT Tour::Handle(UINT m, WPARAM w, LPARAM l)
             int h = HitTest(GET_X_LPARAM(l) / scale_, GET_Y_LPARAM(l) / scale_);
             if (h == 1) End();
             else if (h == 2) Next();
+            else if (h == 3 && onPractice) onPractice();
             return 0;
         }
     }
@@ -164,6 +166,12 @@ void Tour::Draw()
     float by = T + H - float(kPad) - 32;
     if (hover_ == 1) rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(L + kPad, by, 96, 32), 8, 8), surf_.Solid(th.button));
     surf_.DrawText(L"End tour", 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(L + kPad + 22, by + 7, 70, 18), th.dim);
+    if (step_ == 0) {   // no file to hand: one to practise on
+        float px = L + float(kPad) + 104;
+        rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(px, by, 124, 32), 8, 8), surf_.Solid(hover_ == 3 ? WithAlpha(th.button, 0.7) : th.button));
+        float pw = surf_.MeasureText(L"Practice file", 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        surf_.DrawText(L"Practice file", 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(px + 62 - pw / 2, by + 7, pw + 4, 18), th.text);
+    }
     const wchar_t* next = step_ == kSteps_ - 1 ? L"Done" : L"Next";
     float nx = L + W - float(kPad) - 112;
     rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(nx, by, 112, 32), 8, 8), surf_.Solid(hover_ == 2 ? WithAlpha(th.accent, 0.85) : th.accent));
