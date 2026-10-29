@@ -9,6 +9,8 @@
 #include "input.h"
 #include "jobs.h"
 #include "popup.h"
+#include "settings_ui.h"
+#include "tour.h"
 #include "wheel.h"
 #include "worker.h"
 
@@ -21,10 +23,12 @@ namespace {
 
 constexpr UINT WM_RUN = WM_APP + 1;
 constexpr UINT WM_TRAY = WM_APP + 2;
+constexpr UINT WM_SHOW_SETTINGS = WM_APP + 3;   // from a second start of Roda.exe
+constexpr UINT WM_SHOW_TOUR = WM_APP + 4;
 constexpr UINT_PTR TIMER_MODAL = 99;
 constexpr int HOTKEY_WHEEL = 1;
 
-enum Cmd { CmdOutput = 1, CmdPause, CmdStartup, CmdSettings, CmdLog, CmdQuit };
+enum Cmd { CmdOutput = 1, CmdPause, CmdStartup, CmdSettings, CmdTour, CmdLog, CmdQuit };
 
 HWND g_msg = nullptr;
 std::mutex g_uiMutex;
@@ -89,6 +93,9 @@ struct App {
     Jobs jobs;
     Cards cards;
     OptionsPopup popup;
+    SettingsWindow settingsUi{ settings };
+    Tour tour;
+    int choices = 0;   // options chosen so far (the tour watches it)
     std::vector<std::unique_ptr<FloatCard>> floats;
     std::map<int, std::function<void(const JobState&)>> waiting;   // quiet jobs (previews): who wants the result
     HINSTANCE inst = nullptr;
@@ -110,6 +117,16 @@ struct App {
 
         if (!wheel.Create(inst) || !trigger.Create(inst)) Log(L"could not create the wheel or the probe; dragging will not open the wheel");
         if (!cards.Create(inst) || !popup.Create(inst)) Log(L"could not create the cards or the options popup");
+        SetThemeOverride(settings.theme);
+        settingsUi.onKeysChanged = [this] {
+            if (hotkey) UnregisterHotKey(g_msg, HOTKEY_WHEEL);
+            RegisterWheelHotkey();
+        };
+        settingsUi.startupOn = [] { return StartupOn(); };
+        settingsUi.setStartup = [](bool on) { if (on != StartupOn()) SetStartup(on); };
+        tour.onFinished = [this] { if (!settings.welcomed) { settings.welcomed = true; settings.Save(); } };
+        // First run: the tour, once things have settled.
+        if (!settings.welcomed && !TestMode()) After(1.5, [this] { StartTour(); });
         wheel.onChoose = [this](const WheelOption& o, const std::vector<wstring>& paths, POINT at) { Chosen(o, paths, at); };
         jobs.onChange = [this](const JobState& s) {
             if (!s.quiet) { cards.Update(s); return; }
@@ -158,7 +175,7 @@ struct App {
         j.op = op;
         j.inputs = std::move(inputs);
         j.outDir = settings.outputFolder;
-        j.opts.Set(L"jpegQ", settings.jpegQuality).Set(L"webpQ", settings.webpQuality).Set(L"keepMeta", settings.keepMetadata);
+        j.opts.Set(L"jpegQ", settings.jpegQuality).Set(L"webpQ", settings.webpQuality).Set(L"keepMeta", settings.keepMetadata).Set(L"dpi", settings.pdfDpi);
         for (auto& [k, v] : extra.obj) j.opts.Set(k.c_str(), v);
         return j;
     }
@@ -188,9 +205,15 @@ struct App {
         };
     }
 
+    void StartTour()
+    {
+        tour.Start([this] { return wheel.opens(); }, [this] { return choices; });
+    }
+
     void Chosen(const WheelOption& o, const std::vector<wstring>& paths, POINT at)
     {
         const Converter* c = o.conv;
+        choices++;
         Log(L"chosen: %s (%s) on %d item(s)", o.label.c_str(), c->id, int(paths.size()));
         cards.AnchorAt(at);
         wstring id = c->id;
@@ -285,8 +308,8 @@ struct App {
         AppendMenuW(m, MF_STRING | (settings.paused ? MF_CHECKED : 0), CmdPause, L"Pause Roda");
         AppendMenuW(m, MF_STRING | (StartupOn() ? MF_CHECKED : 0), CmdStartup, L"Start with Windows");
         AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
-        // The settings window comes in a later phase; until then the file is edited directly.
-        AppendMenuW(m, MF_STRING, CmdSettings, L"Settings (edit settings.json)");
+        AppendMenuW(m, MF_STRING, CmdSettings, L"Settings…");
+        AppendMenuW(m, MF_STRING, CmdTour, L"Take the tour");
         AppendMenuW(m, MF_STRING, CmdLog, L"Open log");
         AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(m, MF_STRING, CmdQuit, L"Quit Roda");
@@ -300,12 +323,8 @@ struct App {
             case CmdOutput: EnsureDir(settings.outputFolder); ShellExecuteW(nullptr, L"open", settings.outputFolder.c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
             case CmdPause: SetPaused(!settings.paused); break;
             case CmdStartup: SetStartup(!StartupOn()); break;
-            case CmdSettings: {
-                wstring f = JoinPath(DataDir(), L"settings.json");
-                if (!FileExists(f)) settings.Save();
-                ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + f + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
-                break;
-            }
+            case CmdSettings: settingsUi.Show(); break;
+            case CmdTour: StartTour(); break;
             case CmdLog: ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + JoinPath(DataDir(), L"log.txt") + L"\"").c_str(), nullptr, SW_SHOWNORMAL); break;
             case CmdQuit: PostQuitMessage(0); break;
         }
@@ -315,7 +334,7 @@ struct App {
 
     bool NeedFrame() const
     {
-        if (AnyAnimating() || wheel.dirty() || cards.dirty() || popup.dirty() || g_frameWanted) return true;
+        if (AnyAnimating() || wheel.dirty() || cards.dirty() || popup.dirty() || settingsUi.dirty() || tour.dirty() || g_frameWanted) return true;
         for (auto& f : floats) if (f->dirty()) return true;
         return false;
     }
@@ -330,6 +349,8 @@ struct App {
         wheel.Draw();
         cards.Draw();
         if (popup.shown()) popup.Draw();
+        if (settingsUi.shown()) settingsUi.Draw();
+        if (tour.active()) tour.Draw();
         for (auto& f : floats) f->Draw();
         floats.erase(std::remove_if(floats.begin(), floats.end(), [](auto& f) { return f->closed(); }), floats.end());
     }
@@ -397,6 +418,8 @@ LRESULT CALLBACK MsgProc(HWND h, UINT m, WPARAM w, LPARAM l)
         case WM_INPUT:
             if (g_app) g_app->trigger.OnRawInput(reinterpret_cast<HRAWINPUT>(l));
             return DefWindowProcW(h, m, w, l);   // lets Windows free the input
+        case WM_SHOW_SETTINGS: if (g_app) g_app->settingsUi.Show(); return 0;
+        case WM_SHOW_TOUR: if (g_app) g_app->StartTour(); return 0;
         case WM_HOTKEY:
             if (g_app && w == HOTKEY_WHEEL) g_app->OnHotkey();
             return 0;
@@ -456,7 +479,16 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int)
     wstring lockName = L"Roda.SingleInstance";
     if (TestMode()) lockName += L".Test." + std::to_wstring(std::hash<wstring>{}(DataDir()) % 1000000);
     HANDLE mutex = CreateMutexW(nullptr, TRUE, lockName.c_str());
-    if (!mutex || GetLastError() == ERROR_ALREADY_EXISTS) return 0;
+    if (!mutex || GetLastError() == ERROR_ALREADY_EXISTS) {
+        // Roda is already running: starting it again opens its Settings (or the tour, with --tour).
+        if (HWND other = FindWindowW(L"RodaMessages", lockName.c_str())) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(other, &pid);
+            AllowSetForegroundWindow(pid);
+            PostMessageW(other, wcsstr(GetCommandLineW(), L"--tour") ? WM_SHOW_TOUR : WM_SHOW_SETTINGS, 0, 0);
+        }
+        return 0;
+    }
 
     OleInitialize(nullptr);   // apartment-threaded COM: OLE drag and drop needs it
     if (!GfxInit()) { MessageBoxW(nullptr, L"Roda could not start its graphics.", L"Roda", MB_ICONERROR); return 1; }
@@ -466,7 +498,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int)
     wc.hInstance = inst;
     wc.lpszClassName = L"RodaMessages";
     RegisterClassW(&wc);
-    g_msg = CreateWindowExW(0, wc.lpszClassName, L"Roda", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
+    g_msg = CreateWindowExW(0, wc.lpszClassName, lockName.c_str(), WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);   // found by name by a second start
 
     int rc;
     {

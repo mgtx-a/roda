@@ -246,8 +246,13 @@ double ScaleAt(POINT p)
     return Scale();
 }
 
+static int g_theme = 0;
+void SetThemeOverride(int theme) { g_theme = theme; }
+
 bool DarkMode()
 {
+    if (g_theme == 1) return false;
+    if (g_theme == 2) return true;
     DWORD v = 1, size = sizeof v;
     RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"AppsUseLightTheme",
                  RRF_RT_REG_DWORD, nullptr, &v, &size);
@@ -497,6 +502,8 @@ void Settings::Save() const
     num("jpegQuality", jpegQuality);
     num("webpQuality", webpQuality);
     num("compressQuality", compressQuality);
+    num("pdfDpi", pdfDpi);
+    num("theme", theme);
     for (size_t i = 0; i < 3; i++) {
         std::string k = "recentFolder" + std::to_string(i + 1);
         j += "  \""; j += k; j += "\": "; AppendJsonString(j, i < recentFolders.size() ? recentFolders[i] : wstring()); j += ",\n";
@@ -524,6 +531,8 @@ Settings Settings::Load()
     s.jpegQuality = std::clamp(ParseInt(j, "jpegQuality", s.jpegQuality), 1, 100);
     s.webpQuality = std::clamp(ParseInt(j, "webpQuality", s.webpQuality), 1, 100);
     s.compressQuality = std::clamp(ParseInt(j, "compressQuality", s.compressQuality), 1, 100);
+    s.pdfDpi = std::clamp(ParseInt(j, "pdfDpi", s.pdfDpi), 36, 1200);
+    s.theme = std::clamp(ParseInt(j, "theme", s.theme), 0, 2);
     for (int i = 1; i <= 3; i++) {
         wstring f = ParseString(j, ("recentFolder" + std::to_string(i)).c_str());
         if (!f.empty()) s.recentFolders.push_back(f);

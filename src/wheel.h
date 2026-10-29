@@ -31,6 +31,7 @@ public:
     bool open() const { return shown_ && !closing_; }   // shown and not on its way out
     WheelKind kind() const { return kind_; }
     POINT centre() const { return centre_; }
+    int opens() const { return opens_; }      // wheels opened so far
     bool dirty() const { return dirty_; }
     void Draw();
 
@@ -78,6 +79,7 @@ private:
     double keySeenAt_ = -1;
     POINT lastMouse_{};             // keyboard mode: only a real pointer move takes the highlight
     int chosen_ = -1;
+    int opens_ = 0;
     uint32_t token_ = 0;
     Anim open_, fade_, pulse_;
 };

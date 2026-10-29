@@ -231,6 +231,7 @@ void Wheel::ShowForKeyboard(const std::vector<wstring>& paths)
 void Wheel::Open(double keySeenAt)
 {
     token_++;
+    opens_++;
     shown_ = true; closing_ = false; dropped_ = false; chosen_ = -1;
     keySeenAt_ = keySeenAt;
 

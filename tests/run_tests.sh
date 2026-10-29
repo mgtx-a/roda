@@ -235,6 +235,9 @@ if [ -f "$FFDIR/ffmpeg.exe" ]; then
       [ $RC -eq 0 ] && near "$d" "$want" && ok || bad "$f -> $t: rc=$RC duration '$d' (expected $want) $OUT"
     done
   done
+  # AVIF out (and back in) through FFmpeg.
+  convert "$CORPUS/photo.jpg" "$M/p.avif" --op to.avif && { [ "$(field kind)x$(field w)x$(field h)" = "AVIFx640x480" ] && ok || bad "AVIF: $INFO"; }
+  convert "$M/p.avif" "$M/p-avif.png" --op to.png && { [ "$(field w)x$(field h)" = "640x480" ] && ok || bad "AVIF back to PNG: $INFO"; }
   # Copied, not re-encoded, when only the container changes (MKV of VP9+Opus into WebM: identical streams).
   roda --convert "$(win "$CORPUS/clip.mkv")" "$(win "$M/copy.webm")" --op to.webm
   [ "$(stat -c %s "$M/copy.webm")" -gt 40000 ] && [ "$(stat -c %s "$M/copy.webm")" -lt 70000 ] && ok || bad "MKV -> WebM was not a stream copy"

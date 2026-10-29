@@ -4,8 +4,9 @@ Roda (Malay for "wheel") is a portable, offline file converter for Windows 10 an
 Shift, Ctrl or Alt, and a wheel of options opens under the pointer. Drop the file on an option and it is
 converted or acted on, locally.
 
-> **Status: Phase 4, awaiting hand-tests.** Pictures, PDFs, documents, spreadsheets, subtitles, audio,
-> video, archives and file actions work. Phase 5 (a settings window, a first-run tour) is next.
+> **Status: Phase 5, awaiting hand-tests.** Pictures, PDFs, documents, spreadsheets, subtitles, audio,
+> video, archives and file actions work; there is a Settings window and a first-run tour. Phase 6
+> (extras) is what remains.
 
 ## Download
 Not released yet (builds from every push are under the repository's Actions tab). Two builds, for x64 and ARM64, neither needing an installer, admin rights or a runtime:
@@ -37,9 +38,10 @@ presentation) is in front.
 Only the options that work for **every** dropped item are shown; folders and mixed selections get the
 Actions wheel.
 
-- **Convert** (pictures): JPG, PNG, WEBP, PDF, TIFF, BMP, ICO.
-  Reads JPG, PNG, WebP, GIF (first frame), BMP, TIFF (first page), ICO, SVG, and HEIC/AVIF when
-  Microsoft's free "HEIF Image Extensions" / "AV1 Video Extension" are installed.
+- **Convert** (pictures): JPG, PNG, WEBP, PDF, TIFF, BMP, ICO, and AVIF (Full build; transparency
+  becomes white for now). Reads JPG, PNG, WebP, GIF (first frame), BMP, TIFF (first page), ICO, SVG,
+  HEIC and AVIF (through Windows when Microsoft's extensions are installed, otherwise through the Full
+  build's FFmpeg).
 - **Tools** (pictures): Compress (a quality slider), 50%, 1920 px, 1080 px, Size… (width/height),
   Crop (drag a rectangle; free, 1:1, 4:3, 16:9), Rotate, Flip, Strip info, Merge PDF.
   Archives (ZIP, TAR, TAR.GZ, GZ): Extract, into a new folder named after the archive.
@@ -82,13 +84,17 @@ Good to know:
   unless `keepMetadata` is off; other conversions drop it. **Strip info** removes it from JPEG, PNG and
   WebP without re-encoding the picture.
 - Pictures stored sideways (EXIF orientation) come out upright.
-- Settings for now: tray → *Settings (edit settings.json)*: `jpegQuality`, `webpQuality`,
-  `keepMetadata`, `outputFolder` (empty: next to each file), trigger keys, `hotkeyMods`/`hotkeyKey`.
+- **Settings** (tray → *Settings…*, or start `Roda.exe` again while it runs): the three wheel keys,
+  the hotkey (click it and press the new keys), where results go (next to each file or one folder),
+  JPEG and WebP quality, PDF pages as pictures (150/300/600 DPI), photo info kept or removed, the look
+  (as Windows, light, dark) and Start with Windows. Changes apply at once. They live in `settings.json`.
+- **The tour** shows on the first start and walks through a first conversion; tray → *Take the tour*
+  shows it again.
 
 Known limits: a drag from an app running as administrator can't open the wheel (Windows does not let a
 normal app receive drops from an elevated one); don't run Roda as administrator to get around it.
 A PDF made of scanned pages has no text to extract (no OCR); password-protected PDFs are refused with a
-plain message. Not yet: RAR extraction, AVIF/HEIC output, Share, PDF to XLSX, PDF compression, DOCX →
+plain message. Not yet: RAR extraction, HEIC output, transparent AVIF, Share, PDF to XLSX, PDF compression, DOCX →
 PDF without Office installed, joining videos, a still from a video as a picture.
 
 ## Privacy & permissions

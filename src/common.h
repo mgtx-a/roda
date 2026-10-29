@@ -93,7 +93,8 @@ void CleanStaleTemp();                          // folders left by Roda processe
 // ---- screens, DPI, appearance
 double Scale();                                 // system DPI / 96
 double ScaleAt(POINT p);                        // DPI of the monitor at p / 96
-bool DarkMode();                                // apps use the dark theme (read-only registry check)
+bool DarkMode();                                // dark: the user's choice, else Windows' (a read-only registry check)
+void SetThemeOverride(int theme);               // 0 as Windows, 1 light, 2 dark
 bool ReducedMotion();                           // "Show animations in Windows" is off
 
 struct Mon {
@@ -118,6 +119,8 @@ struct Settings {
     int jpegQuality = 88, webpQuality = 82;   // conversions
     int compressQuality = 70;                 // the Compress tool's starting point, remembered
     std::vector<wstring> recentFolders;       // "Copy to" targets, newest first, at most 3
+    int pdfDpi = 300;                         // PDF pages as pictures
+    int theme = 0;                            // 0 as Windows, 1 light, 2 dark
     bool paused = false;
     bool welcomed = false;
     static Settings Load();

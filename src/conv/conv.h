@@ -17,6 +17,9 @@ bool RunPdfTool(const Job& job, const Progress& p, Result& r);     // "pdf.split
 bool MergeWithPdfium(const Job& job, const Progress& p, Result& r); // Merge PDF when a PDF is among the inputs
 bool RunMedia(const Job& job, const Progress& p, Result& r);       // audio and video, "to.mp4" ... and "media.*"
 bool MediaFrame(const wstring& path, std::vector<uint8_t>& png, wstring& err);   // a still from a video, for previews
+bool FfmpegImage(const wstring& path, std::vector<uint8_t>& png, wstring& err);  // HEIC/AVIF pictures Windows can't read, as PNG
+struct Image;
+bool EncodeAvif(const Image& img, int quality, std::vector<uint8_t>& out, wstring& err);
 struct Image;
 bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err);
 

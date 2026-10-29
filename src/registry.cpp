@@ -195,6 +195,7 @@ const std::vector<Converter>& Converters()
         { L"to.tiff", WheelKind::Convert, L"TIFF", kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.bmp",  WheelKind::Convert, L"BMP",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.ico",  WheelKind::Convert, L"ICO",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.avif", WheelKind::Convert, L"AVIF", kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
         { L"to.docx", WheelKind::Convert, L"DOCX", Bit(Kind::Pdf) | Bit(Kind::Markdown) | Bit(Kind::Txt) | Bit(Kind::Html) | Bit(Kind::Rtf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.html", WheelKind::Convert, L"HTML", Bit(Kind::Docx) | Bit(Kind::Markdown) | Bit(Kind::Rtf) | Bit(Kind::Txt), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.md",   WheelKind::Convert, L"MD",   Bit(Kind::Pdf) | Bit(Kind::Docx) | Bit(Kind::Html) | Bit(Kind::Rtf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },

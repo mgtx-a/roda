@@ -510,6 +510,7 @@ Kind TargetOf(const wstring& op)
     if (op == L"to.tiff") return Kind::Tiff;
     if (op == L"to.bmp") return Kind::Bmp;
     if (op == L"to.ico") return Kind::Ico;
+    if (op == L"to.avif") return Kind::Avif;
     return Kind::Unknown;
 }
 
@@ -523,6 +524,7 @@ const wchar_t* ExtOf(Kind k)
         case Kind::Tiff: return L".tiff";
         case Kind::Bmp: return L".bmp";
         case Kind::Ico: return L".ico";
+        case Kind::Avif: return L".avif";
         default: return L"";
     }
 }
@@ -556,9 +558,23 @@ bool DecodeImage(const wstring& path, Image& img, std::vector<uint8_t>& bytes, w
     switch (img.kind) {
         case Kind::Webp: ok = DecodeWebp(bytes, img, err); break;
         case Kind::Svg: ok = DecodeSvg(bytes, img, err); break;
-        case Kind::Jpeg: case Kind::Png: case Kind::Gif: case Kind::Bmp: case Kind::Tiff: case Kind::Ico: case Kind::Heic: case Kind::Avif:
+        case Kind::Jpeg: case Kind::Png: case Kind::Gif: case Kind::Bmp: case Kind::Tiff: case Kind::Ico:
             ok = DecodeWic(bytes, img.kind, img, err);
             break;
+        case Kind::Heic: case Kind::Avif: {
+            // Windows' own codecs when Microsoft's extensions are installed; else the bundled FFmpeg
+            // turns the picture into a PNG first (the Full build).
+            ok = DecodeWic(bytes, img.kind, img, err);
+            std::vector<uint8_t> png;
+            wstring ffErr;
+            if (!ok && EngineAvailable(Engine::Ffmpeg) && FfmpegImage(path, png, ffErr)) {
+                Kind k = img.kind;
+                err.clear();
+                ok = DecodeWic(png, Kind::Png, img, err);
+                img.kind = k;
+            }
+            break;
+        }
         default: err = L"This isn't an image Roda can read."; return false;
     }
     if (!ok) return false;
@@ -606,6 +622,7 @@ bool EncodeImage(const Image& img, Kind kind, int quality, bool lossless, std::v
             break;
         }
         case Kind::Ico: return EncodeIco(img, out, err);
+        case Kind::Avif: return EncodeAvif(Flattened(img), quality, out, err);   // AV1 stills through FFmpeg; no transparency (yet)
         case Kind::Pdf: {
             PdfWriter pdf;
             pdf.AddImage(img, nullptr, 85);
