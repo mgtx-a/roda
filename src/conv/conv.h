@@ -22,7 +22,7 @@ bool WavToMp3(const wstring& wav, std::vector<uint8_t>& mp3, const Progress& p, 
 // speech.cpp
 bool SpeakToWav(const wstring& text, const wstring& wavPath, const Progress& p, wstring& err);   // Windows' own voice, offline
 struct Image;
-bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err);
+bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err, int page = 0, int* pages = nullptr);
 
 // archive.cpp
 bool RunPack(const Job& job, const Progress& p, Result& r);        // "pack.zip", "pack.tar", "pack.targz"

@@ -9,6 +9,7 @@
 #include <fpdf_ppo.h>
 #include <fpdf_save.h>
 #include <fpdf_text.h>
+#include <fpdf_transformpage.h>
 #include <fpdfview.h>
 
 namespace rd {
@@ -23,7 +24,9 @@ namespace rd {
     X(FPDF_CreateNewDocument) X(FPDF_ImportPages) X(FPDF_SaveAsCopy) X(FPDFPage_GetRotation) X(FPDFPage_SetRotation) \
     X(FPDFPage_CountObjects) X(FPDFPage_GetObject) X(FPDFPageObj_GetType) X(FPDFImageObj_GetBitmap) \
     X(FPDFImageObj_GetImageDataRaw) X(FPDFImageObj_GetImageFilterCount) X(FPDFImageObj_GetImageFilter) \
-    X(FPDFFormObj_CountObjects) X(FPDFFormObj_GetObject)
+    X(FPDFFormObj_CountObjects) X(FPDFFormObj_GetObject) \
+    X(FPDFPageObj_NewImageObj) X(FPDFImageObj_SetBitmap) X(FPDFPageObj_SetMatrix) X(FPDFPage_InsertObject) \
+    X(FPDFPage_GenerateContent) X(FPDFPage_GetCropBox) X(FPDFPage_GetMediaBox)
 
 struct Pdfium {
 #define RD_PDFIUM_MEMBER(name) decltype(&::name) name = nullptr;

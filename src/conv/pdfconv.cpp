@@ -345,6 +345,87 @@ bool RunRemovePages(const Job& job, const Progress& p, Result& r)
     return WriteOutput(job, in, BaseName(in) + L" pages removed", L".pdf", bytes, p, r);
 }
 
+/// One picture to put on a page: where, as fractions of the page as it is shown (top left 0,0).
+struct Stamp {
+    int page = 0;                    // 0-based
+    double x = 0, y = 0, w = 0, h = 0;
+    wstring image;
+};
+
+/// Puts `img` on `page` at `s` (fractions of the page as shown, whatever its /Rotate).
+bool PlaceImage(const Pdfium* api, FPDF_DOCUMENT doc, FPDF_PAGE page, const Stamp& s, const Image& img)
+{
+    // The visible box, in the page's own (unrotated) units.
+    float l = 0, b = 0, rt = 0, t = 0;
+    if (!api->FPDFPage_GetCropBox(page, &l, &b, &rt, &t) && !api->FPDFPage_GetMediaBox(page, &l, &b, &rt, &t)) return false;
+    double uw = rt - l, uh = t - b;
+    int rot = api->FPDFPage_GetRotation(page);
+    // A point on the page as shown (u right, v down, 0..1) -> the page's own coordinates.
+    auto user = [&](double u, double v) -> std::pair<double, double> {
+        switch (rot) {
+            case 1:  return { l + v * uw, b + u * uh };     // turned a quarter clockwise
+            case 2:  return { rt - u * uw, b + v * uh };
+            case 3:  return { rt - v * uw, t - u * uh };
+            default: return { l + u * uw, t - v * uh };
+        }
+    };
+    // A PDF image fills the unit square, its bottom left at (0,0): map that onto the stamp's rectangle.
+    auto p00 = user(s.x, s.y + s.h), p10 = user(s.x + s.w, s.y + s.h), p01 = user(s.x, s.y);
+    FS_MATRIX m{ float(p10.first - p00.first), float(p10.second - p00.second), float(p01.first - p00.first), float(p01.second - p00.second),
+                 float(p00.first), float(p00.second) };
+    FPDF_BITMAP bmp = api->FPDFBitmap_CreateEx(img.w, img.h, FPDFBitmap_BGRA, const_cast<uint8_t*>(img.px.data()), img.w * 4);
+    FPDF_PAGEOBJECT obj = api->FPDFPageObj_NewImageObj(doc);
+    bool ok = bmp && obj && api->FPDFImageObj_SetBitmap(&page, 1, obj, bmp) && api->FPDFPageObj_SetMatrix(obj, &m);
+    if (bmp) api->FPDFBitmap_Destroy(bmp);
+    if (!ok) return false;   // (an object never inserted is freed with the document)
+    api->FPDFPage_InsertObject(page, obj);
+    return true;
+}
+
+/// The stamps of a job: "stamps" (from the Sign window), or one from image/page/x/y/w (the command line).
+std::vector<Stamp> StampsOf(const Job& job)
+{
+    std::vector<Stamp> out;
+    for (auto& j : job.opts[L"stamps"].arr)
+        out.push_back({ int(j[L"page"].Num()), j[L"x"].Num(), j[L"y"].Num(), j[L"w"].Num(), j[L"h"].Num(), j[L"image"].Str() });
+    if (out.empty() && job.opts.has(L"image"))
+        out.push_back({ int(_wtof(job.opts[L"page"].Str(L"1").c_str())) - 1, _wtof(job.opts[L"x"].Str(L"0.1").c_str()), _wtof(job.opts[L"y"].Str(L"0.1").c_str()),
+                        _wtof(job.opts[L"w"].Str(L"0.3").c_str()), 0, job.opts[L"image"].Str() });
+    return out;
+}
+
+bool RunStamp(const Job& job, const Progress& p, Result& r)
+{
+    const wstring& in = job.inputs[0];
+    auto stamps = StampsOf(job);
+    if (stamps.empty()) { r.error = L"Nothing to put on the PDF."; return false; }
+    PdfDoc pdf;
+    if (!pdf.Open(in, r.error)) return false;
+    const Pdfium* api = pdf.api();
+    for (size_t i = 0; i < stamps.size(); i++) {
+        Stamp& s = stamps[i];
+        if (s.page < 0 || s.page >= pdf.pages()) { r.error = L"This PDF has " + std::to_wstring(pdf.pages()) + L" pages."; return false; }
+        Image img;
+        std::vector<uint8_t> bytes;
+        if (!DecodeImage(s.image, img, bytes, r.error)) return false;
+        FPDF_PAGE page = api->FPDF_LoadPage(pdf.get(), s.page);
+        if (!page) { r.error = L"Could not open page " + std::to_wstring(s.page + 1) + L"."; return false; }
+        if (s.h <= 0) {
+            // Keep the picture's shape on the page as shown (a turned page swaps width and height).
+            double pw = api->FPDF_GetPageWidthF(page), ph = api->FPDF_GetPageHeightF(page);
+            s.h = s.w * img.h / img.w * pw / ph;
+        }
+        bool ok = PlaceImage(api, pdf.get(), page, s, img) && api->FPDFPage_GenerateContent(page);
+        api->FPDF_ClosePage(page);
+        if (!ok) { r.error = L"Could not put the picture on page " + std::to_wstring(s.page + 1) + L"."; return false; }
+        p.Set(0.8 * double(i + 1) / double(stamps.size()));
+    }
+    std::vector<uint8_t> out;
+    if (!SavePdf(api, pdf.get(), out)) { r.error = L"Could not save the PDF."; return false; }
+    r.before = FileSize(in);
+    return WriteOutput(job, in, BaseName(in) + (job.op == L"pdf.sign" ? L" signed" : L" edited"), L".pdf", out, p, r);
+}
+
 bool RunSplit(const Job& job, const Progress& p, Result& r)
 {
     const wstring& in = job.inputs[0];
@@ -404,12 +485,13 @@ bool RunImages(const Job& job, const Progress& p, Result& r)
 
 // ---------------------------------------------------------------- public
 
-bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err)
+bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err, int page, int* pages)
 {
     PdfDoc pdf;
     if (!pdf.Open(path, err)) return false;
     if (pdf.pages() < 1) { err = L"This PDF has no pages."; return false; }
-    return RenderPage(pdf, 0, 300, img, err, maxSide);
+    if (pages) *pages = pdf.pages();
+    return RenderPage(pdf, std::clamp(page, 0, pdf.pages() - 1), 300, img, err, maxSide);
 }
 
 bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& r)
@@ -494,6 +576,7 @@ bool RunPdfTool(const Job& job, const Progress& p, Result& r)
     if (job.op == L"pdf.images") return RunImages(job, p, r);
     if (job.op == L"pdf.rotate") return RunRotate(job, p, r);
     if (job.op == L"pdf.remove") return RunRemovePages(job, p, r);
+    if (job.op == L"pdf.sign" || job.op == L"pdf.picture") return RunStamp(job, p, r);
     r.error = L"Unknown PDF tool.";
     return false;
 }

@@ -134,6 +134,11 @@ if [ -f "$(dirname "$EXE")/engines/pdfium.dll" ]; then
   [ $RC -eq 1 ] && grep -q "every page" <<<"$OUT" && [ ! -f "$P/none.pdf" ] && ok || bad "removing every page must fail: $OUT"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/none.pdf")" --op pdf.remove --option "pages=4"
   [ $RC -eq 1 ] && grep -q "has 3 pages" <<<"$OUT" && ok || bad "page 4 of 3 must fail: $OUT"
+  # A picture placed on page 2 (Sign / Add picture): still 3 pages, and the PDF grew by the picture.
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/stamped.pdf")" --op pdf.picture --option "image=$(win "$CORPUS/photo.png")" --option page=2 --option x=0.5 --option y=0.2 --option w=0.3
+  info "$P/stamped.pdf"; [ "$(field pages)" = "3" ] && [ "$(field bytes)" -gt 9000 ] && ok || bad "picture on page 2: $INFO"
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/stamped2.pdf")" --op pdf.sign --option "image=$(win "$CORPUS/photo.png")" --option page=7
+  [ $RC -eq 1 ] && grep -q "has 3 pages" <<<"$OUT" && ok || bad "picture on page 7 of 3 must fail: $OUT"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/rot.pdf")" --op pdf.rotate
   info "$P/rot.pdf"; [ "$(field pages)" = "3" ] && ok || bad "rotate: $INFO"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$CORPUS/photo.jpg")" "$(win "$CORPUS/long.pdf")" "$(win "$P/merged.pdf")"

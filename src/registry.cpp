@@ -239,6 +239,8 @@ const std::vector<Converter>& Converters()
         { L"pdf.images",      WheelKind::Tools, L"Images",      Bit(Kind::Pdf), Icon::Images, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.rotate",      WheelKind::Tools, L"Rotate",      Bit(Kind::Pdf), Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.remove",      WheelKind::Tools, L"Remove pages", Bit(Kind::Pdf), Icon::RemovePage, C::PerFile, 1, 0, Popup::Pages, RunPdfTool, Engine::Pdfium },
+        { L"pdf.sign",        WheelKind::Tools, L"Sign",        Bit(Kind::Pdf), Icon::Sign, C::PerFile, 1, 1, Popup::Place, RunPdfTool, Engine::Pdfium },
+        { L"pdf.picture",     WheelKind::Tools, L"Add picture", Bit(Kind::Pdf), Icon::Picture, C::PerFile, 1, 1, Popup::Place, RunPdfTool, Engine::Pdfium },
         { L"tool.extract",    WheelKind::Tools, L"Extract",     kArchives, Icon::Extract, C::PerFile, 1, 0, Popup::None, RunExtract },
         { L"media.trim",      WheelKind::Tools, L"Trim",        kAudio | kVideo, Icon::Trim, C::PerFile, 1, 1, Popup::Trim, RunMedia, Engine::Ffmpeg },
         { L"media.compress",  WheelKind::Tools, L"Compress",    kAudio | kVideo, Icon::Compress, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },

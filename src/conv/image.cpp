@@ -762,9 +762,10 @@ bool RunPreview(const Job& job, const Progress& p, Result& r)
         return WriteOutput(job, job.inputs[0], L"", L".png", out, p, r);
     }
     if (KindOfPath(job.inputs[0]) == Kind::Pdf) {
-        // A PDF's first page, drawn at the size the preview needs.
-        if (!PdfPreview(job.inputs[0], Opt(job, L"max", 2048), img, r.error)) return false;
-        r.info.Set(L"w", img.w).Set(L"h", img.h);
+        // A PDF's page (the first unless asked), drawn at the size the preview needs.
+        int pages = 0;
+        if (!PdfPreview(job.inputs[0], Opt(job, L"max", 2048), img, r.error, Opt(job, L"page", 0), &pages)) return false;
+        r.info.Set(L"w", img.w).Set(L"h", img.h).Set(L"pages", pages);
         if (!EncodeImage(img, Kind::Png, 0, true, out, r.error)) return false;
         return WriteOutput(job, job.inputs[0], L"", L".png", out, p, r);
     }

@@ -9,6 +9,7 @@
 #include "input.h"
 #include "jobs.h"
 #include "popup.h"
+#include "place.h"
 #include "settings_ui.h"
 #include "tour.h"
 #include "wheel.h"
@@ -128,6 +129,7 @@ struct App {
     Cards cards;
     OptionsPopup popup;
     SettingsWindow settingsUi{ settings };
+    PlaceWindow placeUi;
     Tour tour;
     int choices = 0;   // options chosen so far (the tour watches it)
     std::vector<std::unique_ptr<FloatCard>> floats;
@@ -248,6 +250,24 @@ struct App {
         };
     }
 
+    /// The Sign window: pages come from quiet preview jobs, Save submits the placements.
+    void OpenPlace(const WheelOption& o, const wstring& pdf, bool draw)
+    {
+        placeUi.onNeedPage = [this, pdf](int page) {
+            Job j = MakeJob(L"prep.preview", { pdf }, Json::Object().Set(L"max", 1600).Set(L"page", page));
+            static int n = 0;
+            j.outPath = JoinPath(TempDir(), L"page-" + std::to_wstring(++n) + L".png");
+            j.outDir.clear();
+            int id = jobs.Submit(j, FileName(pdf), L"Page", true);
+            waiting[id] = [this, page](const JobState& s) {
+                if (s.phase != JobState::Done) { placeUi.PageFailed(s.error); return; }
+                placeUi.SetPage(page, s.out, int(s.info[L"info"][L"pages"].Num(1)));
+            };
+        };
+        placeUi.onSave = [this, o, pdf](const Json& opts) { Submit(o, { pdf }, opts); };
+        placeUi.Show(pdf, draw);
+    }
+
     std::vector<wstring> opened;     // paths from "Roda…" in Explorer, gathered for a moment
     std::vector<wstring> lastOpened; // the last batch shown, in case more of the same selection arrives
     double lastOpenedAt = -10;
@@ -303,6 +323,7 @@ struct App {
             return;
         }
         if (c->popup == Popup::None) { Submit(o, paths, Json::Object()); return; }
+        if (c->popup == Popup::Place) { OpenPlace(o, paths[0], id == L"pdf.sign"); return; }
 
         // Options first: the popup opens where the wheel was.
         popup.onApply = [this, o, paths](const Json& opts) {
@@ -405,7 +426,7 @@ struct App {
 
     bool NeedFrame() const
     {
-        if (AnyAnimating() || wheel.dirty() || cards.dirty() || popup.dirty() || settingsUi.dirty() || tour.dirty() || g_frameWanted) return true;
+        if (AnyAnimating() || wheel.dirty() || cards.dirty() || popup.dirty() || settingsUi.dirty() || placeUi.dirty() || tour.dirty() || g_frameWanted) return true;
         for (auto& f : floats) if (f->dirty()) return true;
         return false;
     }
@@ -421,6 +442,7 @@ struct App {
         cards.Draw();
         if (popup.shown()) popup.Draw();
         if (settingsUi.shown()) settingsUi.Draw();
+        if (placeUi.shown()) placeUi.Draw();
         if (tour.active()) tour.Draw();
         for (auto& f : floats) f->Draw();
         floats.erase(std::remove_if(floats.begin(), floats.end(), [](auto& f) { return f->closed(); }), floats.end());

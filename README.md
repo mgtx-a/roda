@@ -58,7 +58,7 @@ The first time you start Roda, a short tour shows you how it works.
 | Files | Change into | Tools |
 |---|---|---|
 | **Photos** (JPG, PNG, WebP, GIF, BMP, TIFF, ICO, SVG, HEIC, AVIF) | JPG, PNG, WebP, PDF, TIFF, BMP, ICO | Make smaller, resize, crop, rotate, flip, remove photo info, join into one PDF |
-| **PDFs** \* | Pictures (PNG, JPG), text, Word (DOCX), ebook (EPUB), PowerPoint (PPTX), MP3 (read aloud) | Remove pages, split into pages, take out the pictures, rotate, join PDFs |
+| **PDFs** \* | Pictures (PNG, JPG), text, Word (DOCX), ebook (EPUB), PowerPoint (PPTX), MP3 (read aloud) | Sign (draw with the mouse), add a picture, remove pages, split into pages, take out the pictures, rotate, join PDFs |
 | **Documents** (Word DOCX, Markdown, HTML, RTF, TXT) | Each other, and ebook (EPUB) | |
 | **Word, Excel, PowerPoint** | PDF (only if Microsoft Office is on your PC) | |
 | **Spreadsheets** (Excel XLSX and XLS, ODS, CSV, TSV) | XLSX, ODS, CSV, TSV | |
@@ -69,6 +69,16 @@ The first time you start Roda, a short tour shows you how it works.
 | **Anything** | | Copy to, Move to, make a ZIP, copy the file's path, open a terminal here, pin a picture on top of your screen |
 
 \* Full version only.
+
+### Signing a PDF
+Drag a PDF, press **Ctrl**, drop on **Sign**. A window shows the PDF:
+1. Sign on the white pad with your mouse (or pen), then click **Use**.
+2. Drag the signature where you want it. Drag its corner dot to make it bigger or smaller.
+3. Use **‹ ›** to go to another page. You can add more signatures, or pictures with **Add picture…**
+   (a stamp, a logo, a scanned signature).
+4. Click **Save**. You get `report signed.pdf`; the original stays as it was.
+
+This puts a picture of your signature on the page. It is not a certificate-based digital signature.
 
 ### Settings
 Right-click the wheel icon near the clock and choose **Settings**. There you can change:

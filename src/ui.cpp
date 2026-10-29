@@ -45,6 +45,8 @@ const char* IconPath(Icon i)
         case Icon::Mute: return "M3 9 L7 9 L12 5 L12 19 L7 15 L3 15 Z M16 9 L21 15 M21 9 L16 15";
         case Icon::Audio: return "M9 18 L9 5 L20 3 L20 16 O6.5 18 2.5 O17.5 16 2.5";
         case Icon::Film: return "M3 5 L21 5 L21 19 L3 19 Z M7 5 L7 19 M17 5 L17 19 M3 9 L7 9 M3 15 L7 15 M17 9 L21 9 M17 15 L21 15";
+        case Icon::Sign: return "M3 19 C6 13 8 11 9 13 C10 15 8 18 10 18 C12 18 13 14 15 14 C16 14 16 17 18 17 L21 17 M14 4 L19 9 L12 16 L8 17 L9 13 Z";
+        case Icon::Picture: return "M3 6 L15 6 M3 6 L3 19 L21 19 L21 12 M3 16 L8 11 L12 15 L14 13 L21 19 M18 3 L18 9 M15 6 L21 6";
         case Icon::RemovePage: return "M6 3 L14 3 L18 7 L18 21 L6 21 Z M9 13 L15 13";
         case Icon::Archive: return "M4 4 L20 4 L20 20 L4 20 Z M12 4 L12 6 M11 7 L13 7 M12 8 L12 10 M11 11 L13 11 M10 13 L14 13 L14 16.5 L10 16.5 Z";
         default: return nullptr;
