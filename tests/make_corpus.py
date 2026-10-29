@@ -210,4 +210,19 @@ with open(path("sample.srt"), "w", encoding="utf-8") as f:
 with open(path("sample.vtt"), "w", encoding="utf-8") as f:
     f.write("WEBVTT\n\nNOTE a comment\n\nintro\n00:01.000 --> 00:03.500 align:start\nHi &amp; welcome.\n\n00:00:04.000 --> 00:00:06.000\nSecond cue.\n")
 
+# A form with real fields (Fill form): a text box, a checkbox, two radio buttons and a dropdown.
+c = canvas.Canvas(path("form.pdf"), pagesize=A4)
+c.setFont("Helvetica", 12)
+c.drawString(72, 760, "Name:")
+c.acroForm.textfield(name="name", tooltip="Your name", x=140, y=750, width=250, height=22, borderWidth=1, value="")
+c.drawString(72, 710, "I agree:")
+c.acroForm.checkbox(name="agree", tooltip="Agree", x=140, y=705, size=18, checked=False)
+c.drawString(72, 660, "Size:")
+c.acroForm.radio(name="size", value="S", tooltip="Small", x=140, y=655, size=18, selected=False)
+c.acroForm.radio(name="size", value="M", tooltip="Medium", x=180, y=655, size=18, selected=False)
+c.drawString(72, 610, "Colour:")
+c.acroForm.choice(name="colour", tooltip="Colour", x=140, y=600, width=150, height=22, options=["Red", "Green", "Blue"], value="Red")
+c.showPage()
+c.save()
+
 print("corpus:", sum(os.path.getsize(os.path.join(dp, n)) for dp, _, ns in os.walk(OUT) for n in ns) // 1024, "KB")

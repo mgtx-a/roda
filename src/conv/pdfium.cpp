@@ -32,6 +32,7 @@ const Pdfium* LoadPdfium(wstring& err)
 
 PdfDoc::~PdfDoc()
 {
+    if (form_ && p_) p_->FPDFDOC_ExitFormFillEnvironment(form_);   // before the document it belongs to
     if (doc_ && p_) p_->FPDF_CloseDocument(doc_);
 }
 
@@ -61,6 +62,12 @@ bool PdfDoc::OpenMemory(std::vector<uint8_t> bytes, wstring& err)
     return false;
 }
 
+FPDF_FORMHANDLE PdfDoc::form() const
+{
+    if (!form_ && doc_) { formInfo_.version = 1; form_ = p_->FPDFDOC_InitFormFillEnvironment(doc_, &formInfo_); }
+    return form_;
+}
+
 bool RenderPage(const PdfDoc& doc, int index, double dpi, Image& out, wstring& err, int maxSide)
 {
     const Pdfium* p = doc.api();
@@ -75,7 +82,13 @@ bool RenderPage(const PdfDoc& doc, int index, double dpi, Image& out, wstring& e
     FPDF_BITMAP bmp = p->FPDFBitmap_CreateEx(w, h, FPDFBitmap_BGRx, nullptr, 0);
     if (!bmp) { p->FPDF_ClosePage(page); err = L"Not enough memory to draw the page."; return false; }
     p->FPDFBitmap_FillRect(bmp, 0, 0, w, h, 0xFFFFFFFF);
-    p->FPDF_RenderPageBitmap(bmp, page, 0, 0, w, h, 0, FPDF_ANNOT);   // form fields and comments as a viewer shows them
+    p->FPDF_RenderPageBitmap(bmp, page, 0, 0, w, h, 0, FPDF_ANNOT);   // comments as a viewer shows them
+    if (FPDF_FORMHANDLE form = doc.form()) {
+        // Form fields (and what is filled in them) are drawn by the form engine, over the page.
+        p->FORM_OnAfterLoadPage(page, form);
+        p->FPDF_FFLDraw(form, bmp, page, 0, 0, w, h, 0, FPDF_ANNOT);
+        p->FORM_OnBeforeClosePage(page, form);
+    }
     out = {};
     out.w = w;
     out.h = h;

@@ -345,6 +345,42 @@ bool RunRemovePages(const Job& job, const Progress& p, Result& r)
     return WriteOutput(job, in, BaseName(in) + L" pages removed", L".pdf", bytes, p, r);
 }
 
+/// A page's visible box and turn: converts between the page as shown (u right, v down, 0..1, what
+/// the Sign window works in) and the page's own coordinates (points, y up, before /Rotate).
+struct PageBox {
+    double l = 0, b = 0, r = 0, t = 0;
+    int rot = 0;
+    PageBox(const Pdfium* api, FPDF_PAGE page)
+    {
+        float L = 0, B = 0, R = 0, T = 0;
+        if (api->FPDFPage_GetCropBox(page, &L, &B, &R, &T) || api->FPDFPage_GetMediaBox(page, &L, &B, &R, &T)) { l = L; b = B; r = R; t = T; }
+        else { r = api->FPDF_GetPageWidthF(page); t = api->FPDF_GetPageHeightF(page); }
+        rot = api->FPDFPage_GetRotation(page) & 3;
+    }
+    double uw() const { return r - l; }
+    double uh() const { return t - b; }
+    double shownW() const { return rot & 1 ? uh() : uw(); }   // points, as shown
+    double shownH() const { return rot & 1 ? uw() : uh(); }
+    std::pair<double, double> User(double u, double v) const
+    {
+        switch (rot) {
+            case 1:  return { l + v * uw(), b + u * uh() };   // turned a quarter clockwise
+            case 2:  return { r - u * uw(), b + v * uh() };
+            case 3:  return { r - v * uw(), t - u * uh() };
+            default: return { l + u * uw(), t - v * uh() };
+        }
+    }
+    std::pair<double, double> Shown(double x, double y) const
+    {
+        switch (rot) {
+            case 1:  return { (y - b) / uh(), (x - l) / uw() };
+            case 2:  return { (r - x) / uw(), (y - b) / uh() };
+            case 3:  return { (t - y) / uh(), (r - x) / uw() };
+            default: return { (x - l) / uw(), (t - y) / uh() };
+        }
+    }
+};
+
 /// One picture to put on a page: where, as fractions of the page as it is shown (top left 0,0).
 struct Stamp {
     int page = 0;                    // 0-based
@@ -352,25 +388,12 @@ struct Stamp {
     wstring image;
 };
 
-/// Puts `img` on `page` at `s` (fractions of the page as shown, whatever its /Rotate).
+/// Puts `img` on `page` at `s`, upright on the page as shown.
 bool PlaceImage(const Pdfium* api, FPDF_DOCUMENT doc, FPDF_PAGE page, const Stamp& s, const Image& img)
 {
-    // The visible box, in the page's own (unrotated) units.
-    float l = 0, b = 0, rt = 0, t = 0;
-    if (!api->FPDFPage_GetCropBox(page, &l, &b, &rt, &t) && !api->FPDFPage_GetMediaBox(page, &l, &b, &rt, &t)) return false;
-    double uw = rt - l, uh = t - b;
-    int rot = api->FPDFPage_GetRotation(page);
-    // A point on the page as shown (u right, v down, 0..1) -> the page's own coordinates.
-    auto user = [&](double u, double v) -> std::pair<double, double> {
-        switch (rot) {
-            case 1:  return { l + v * uw, b + u * uh };     // turned a quarter clockwise
-            case 2:  return { rt - u * uw, b + v * uh };
-            case 3:  return { rt - v * uw, t - u * uh };
-            default: return { l + u * uw, t - v * uh };
-        }
-    };
+    PageBox box(api, page);
     // A PDF image fills the unit square, its bottom left at (0,0): map that onto the stamp's rectangle.
-    auto p00 = user(s.x, s.y + s.h), p10 = user(s.x + s.w, s.y + s.h), p01 = user(s.x, s.y);
+    auto p00 = box.User(s.x, s.y + s.h), p10 = box.User(s.x + s.w, s.y + s.h), p01 = box.User(s.x, s.y);
     FS_MATRIX m{ float(p10.first - p00.first), float(p10.second - p00.second), float(p01.first - p00.first), float(p01.second - p00.second),
                  float(p00.first), float(p00.second) };
     FPDF_BITMAP bmp = api->FPDFBitmap_CreateEx(img.w, img.h, FPDFBitmap_BGRA, const_cast<uint8_t*>(img.px.data()), img.w * 4);
@@ -382,7 +405,138 @@ bool PlaceImage(const Pdfium* api, FPDF_DOCUMENT doc, FPDF_PAGE page, const Stam
     return true;
 }
 
-/// The stamps of a job: "stamps" (from the Sign window), or one from image/page/x/y/w (the command line).
+/// Typed text, one object per line, in Helvetica (every PDF reader has it): `size` points, its
+/// top left at (x, y) on the page as shown.
+bool PlaceText(const Pdfium* api, FPDF_DOCUMENT doc, FPDF_PAGE page, double x, double y, double size, const wstring& text)
+{
+    PageBox box(api, page);
+    auto o = box.User(0, 0), ru = box.User(1, 0), dv = box.User(0, 1);
+    double rx = (ru.first - o.first) / box.shownW(), ry = (ru.second - o.second) / box.shownW();   // one point to the right
+    double ux = (o.first - dv.first) / box.shownH(), uy = (o.second - dv.second) / box.shownH();   // one point up
+    FPDF_FONT font = api->FPDFText_LoadStandardFont(doc, "Helvetica");
+    if (!font) return false;
+    bool ok = true;
+    size_t start = 0;
+    for (int line = 0; start <= text.size() && ok; line++) {
+        size_t end = text.find(L'\n', start);
+        if (end == wstring::npos) end = text.size();
+        wstring one = text.substr(start, end - start);
+        start = end + 1;
+        if (one.empty()) continue;
+        // The baseline sits about 0.8 of the size below the top; lines are 1.2 sizes apart.
+        double base = y + (0.8 + 1.2 * line) * size / box.shownH();
+        auto at = box.User(x, base);
+        FPDF_PAGEOBJECT t = api->FPDFPageObj_CreateTextObj(doc, font, float(size));
+        FS_MATRIX m{ float(rx), float(ry), float(ux), float(uy), float(at.first), float(at.second) };
+        ok = t && api->FPDFText_SetText(t, reinterpret_cast<FPDF_WIDESTRING>(one.c_str())) && api->FPDFPageObj_SetMatrix(t, &m);
+        if (ok) api->FPDFPage_InsertObject(page, t);
+    }
+    api->FPDFFont_Close(font);
+    return ok;
+}
+
+/// PDFium's form engine for one document, set up and torn down with it. No callbacks are needed to
+/// read and set field values.
+struct FormEnv {
+    const Pdfium* api;
+    FPDF_FORMFILLINFO info{};
+    FPDF_FORMHANDLE form = nullptr;
+    FormEnv(const Pdfium* a, FPDF_DOCUMENT doc) : api(a) { info.version = 1; form = api->FPDFDOC_InitFormFillEnvironment(doc, &info); }
+    ~FormEnv() { if (form) api->FPDFDOC_ExitFormFillEnvironment(form); }
+};
+
+/// A field string (UTF-16 from PDFium) as a wstring.
+wstring FieldString(const std::function<unsigned long(FPDF_WCHAR*, unsigned long)>& get)
+{
+    unsigned long n = get(nullptr, 0);
+    if (n <= 2) return L"";
+    std::vector<FPDF_WCHAR> buf(n / 2 + 1, 0);
+    get(buf.data(), n);
+    return wstring(reinterpret_cast<const wchar_t*>(buf.data()));
+}
+
+/// "prep.fields": the fillable fields of every page, for the Sign window (no file is written).
+bool RunFields(const Job& job, const Progress& p, Result& r)
+{
+    PdfDoc pdf;
+    if (!pdf.Open(job.inputs[0], r.error)) return false;
+    const Pdfium* api = pdf.api();
+    FormEnv env(api, pdf.get());
+    Json fields = Json::Array();
+    for (int pg = 0, n = pdf.pages(); pg < n && env.form; pg++) {
+        FPDF_PAGE page = api->FPDF_LoadPage(pdf.get(), pg);
+        if (!page) continue;
+        api->FORM_OnAfterLoadPage(page, env.form);
+        PageBox box(api, page);
+        for (int k = 0, count = api->FPDFPage_GetAnnotCount(page); k < count; k++) {
+            FPDF_ANNOTATION a = api->FPDFPage_GetAnnot(page, k);
+            if (!a) continue;
+            int type = api->FPDFAnnot_GetSubtype(a) == FPDF_ANNOT_WIDGET ? api->FPDFAnnot_GetFormFieldType(env.form, a) : 0;
+            int flags = type ? api->FPDFAnnot_GetFormFieldFlags(env.form, a) : 0;
+            FS_RECTF rc{};
+            // Text, check boxes, radio buttons and lists; not buttons, signature fields or read-only ones.
+            if (type >= FPDF_FORMFIELD_CHECKBOX && type <= FPDF_FORMFIELD_TEXTFIELD && !(flags & FPDF_FORMFLAG_READONLY) && api->FPDFAnnot_GetRect(a, &rc)) {
+                auto c1 = box.Shown(rc.left, rc.top), c2 = box.Shown(rc.right, rc.bottom);
+                Json f = Json::Object();
+                f.Set(L"page", pg).Set(L"i", k).Set(L"type", type)
+                 .Set(L"x", std::min(c1.first, c2.first)).Set(L"y", std::min(c1.second, c2.second))
+                 .Set(L"w", std::fabs(c2.first - c1.first)).Set(L"h", std::fabs(c2.second - c1.second))
+                 .Set(L"name", FieldString([&](FPDF_WCHAR* b, unsigned long n) { return api->FPDFAnnot_GetFormFieldName(env.form, a, b, n); }))
+                 .Set(L"label", FieldString([&](FPDF_WCHAR* b, unsigned long n) { return api->FPDFAnnot_GetFormFieldAlternateName(env.form, a, b, n); }))
+                 .Set(L"value", FieldString([&](FPDF_WCHAR* b, unsigned long n) { return api->FPDFAnnot_GetFormFieldValue(env.form, a, b, n); }))
+                 .Set(L"export", FieldString([&](FPDF_WCHAR* b, unsigned long n) { return api->FPDFAnnot_GetFormFieldExportValue(env.form, a, b, n); }))
+                 .Set(L"checked", bool(api->FPDFAnnot_IsChecked(env.form, a)))
+                 .Set(L"multiline", type == FPDF_FORMFIELD_TEXTFIELD && (flags & FPDF_FORMFLAG_TEXT_MULTILINE) != 0)
+                 .Set(L"pth", box.shownH());
+                Json options = Json::Array();
+                for (int o = 0, no = api->FPDFAnnot_GetOptionCount(env.form, a); o < no; o++)
+                    options.Push(FieldString([&](FPDF_WCHAR* b, unsigned long n) { return api->FPDFAnnot_GetOptionLabel(env.form, a, o, b, n); }));
+                f.Set(L"options", options);
+                fields.Push(f);
+            }
+            api->FPDFPage_CloseAnnot(a);
+        }
+        api->FORM_OnBeforeClosePage(page, env.form);
+        api->FPDF_ClosePage(page);
+        p.Set(0.9 * (pg + 1) / n);
+    }
+    r.info.Set(L"fields", fields).Set(L"pages", pdf.pages());
+    return true;
+}
+
+/// Sets the changed fields of one page, through PDFium's form engine as if typed or clicked, so
+/// their appearance is redrawn too.
+bool FillPage(const Pdfium* api, const FormEnv& env, FPDF_PAGE page, const std::vector<const Json*>& changes)
+{
+    for (const Json* f : changes) {
+        FPDF_ANNOTATION a = api->FPDFPage_GetAnnot(page, int((*f)[L"i"].Num()));
+        if (!a) return false;
+        int type = api->FPDFAnnot_GetFormFieldType(env.form, a);
+        if (type == FPDF_FORMFIELD_TEXTFIELD) {
+            wstring v = (*f)[L"value"].Str();
+            api->FORM_SetFocusedAnnot(env.form, a);
+            api->FORM_SelectAllText(env.form, page);
+            api->FORM_ReplaceSelection(env.form, page, reinterpret_cast<FPDF_WIDESTRING>(v.c_str()));
+        } else if (type == FPDF_FORMFIELD_CHECKBOX || type == FPDF_FORMFIELD_RADIOBUTTON) {
+            // A click in its middle toggles it (a radio button only turns on).
+            if (bool(api->FPDFAnnot_IsChecked(env.form, a)) != (*f)[L"checked"].Bool()) {
+                FS_RECTF rc{};
+                api->FPDFAnnot_GetRect(a, &rc);
+                double cx = (rc.left + rc.right) / 2, cy = (rc.top + rc.bottom) / 2;
+                api->FORM_OnLButtonDown(env.form, page, 0, cx, cy);
+                api->FORM_OnLButtonUp(env.form, page, 0, cx, cy);
+            }
+        } else if (type == FPDF_FORMFIELD_COMBOBOX || type == FPDF_FORMFIELD_LISTBOX) {
+            api->FORM_SetFocusedAnnot(env.form, a);
+            api->FORM_SetIndexSelected(env.form, page, int((*f)[L"index"].Num()), true);
+        }
+        api->FORM_ForceToKillFocus(env.form);
+        api->FPDFPage_CloseAnnot(a);
+    }
+    return true;
+}
+
+/// The pictures of a job: "stamps" (from the Sign window), or one from image/page/x/y/w (the command line).
 std::vector<Stamp> StampsOf(const Job& job)
 {
     std::vector<Stamp> out;
@@ -394,36 +548,113 @@ std::vector<Stamp> StampsOf(const Job& job)
     return out;
 }
 
-bool RunStamp(const Job& job, const Progress& p, Result& r)
+/// The command line's --option "set=name=Ahmad;agree=on;size=M;colour=Blue" (a radio button by its export value).
+void FieldsFromCommandLine(const Job& job, Json& fields, const Json& known)
+{
+    wstring spec = job.opts[L"set"].Str();
+    for (size_t start = 0; start < spec.size();) {
+        size_t end = spec.find(L';', start);
+        if (end == wstring::npos) end = spec.size();
+        wstring kv = spec.substr(start, end - start);
+        start = end + 1;
+        size_t eq = kv.find(L'=');
+        if (eq == wstring::npos) continue;
+        wstring name = kv.substr(0, eq), value = kv.substr(eq + 1);
+        for (auto& f : known.arr) {
+            if (f[L"name"].Str() != name) continue;
+            Json c = f;
+            int type = int(f[L"type"].Num());
+            if (type == FPDF_FORMFIELD_TEXTFIELD) c.Set(L"value", value);
+            else if (type == FPDF_FORMFIELD_CHECKBOX) c.Set(L"checked", value == L"on" || value == L"yes" || value == L"true");
+            else if (type == FPDF_FORMFIELD_RADIOBUTTON) { if (f[L"export"].Str() != value) continue; c.Set(L"checked", true); }   // "size=M"
+            else {
+                int idx = -1;
+                for (size_t o = 0; o < f[L"options"].arr.size(); o++) if (f[L"options"].arr[o].Str() == value) idx = int(o);
+                if (idx < 0) continue;
+                c.Set(L"index", idx);
+            }
+            fields.Push(c);
+            if (type != FPDF_FORMFIELD_RADIOBUTTON) break;
+        }
+    }
+}
+
+/// "pdf.sign", "pdf.picture", "pdf.fill": fields filled, text typed and pictures placed, in one new PDF.
+bool RunEdit(const Job& job, const Progress& p, Result& r)
 {
     const wstring& in = job.inputs[0];
     auto stamps = StampsOf(job);
-    if (stamps.empty()) { r.error = L"Nothing to put on the PDF."; return false; }
+    Json fields = job.opts[L"fields"];
+    Json texts = job.opts[L"texts"];
+    if (job.opts.has(L"text"))   // the command line: --option text=... page=1 x=0.1 y=0.1 size=12
+        texts.Push(Json::Object().Set(L"page", _wtoi(job.opts[L"page"].Str(L"1").c_str()) - 1).Set(L"x", _wtof(job.opts[L"x"].Str(L"0.1").c_str()))
+                                 .Set(L"y", _wtof(job.opts[L"y"].Str(L"0.1").c_str())).Set(L"size", _wtof(job.opts[L"size"].Str(L"12").c_str())).Set(L"text", job.opts[L"text"].Str()));
+    if (job.opts.has(L"set")) {
+        Job probe = job;
+        Result known;
+        if (!RunFields(probe, Progress{}, known)) { r.error = known.error; return false; }
+        fields = Json::Array();
+        FieldsFromCommandLine(job, fields, known.info[L"fields"]);
+        if (fields.arr.empty()) { r.error = L"No field with that name (or that choice) in this PDF."; return false; }
+    }
+    if (stamps.empty() && fields.arr.empty() && texts.arr.empty()) { r.error = L"Nothing to change in the PDF."; return false; }
     PdfDoc pdf;
     if (!pdf.Open(in, r.error)) return false;
     const Pdfium* api = pdf.api();
+    auto badPage = [&](int pg) { r.error = L"This PDF has " + std::to_wstring(pdf.pages()) + L" pages."; return pg < 0 || pg >= pdf.pages(); };
+
+    if (!fields.arr.empty()) {
+        FormEnv env(api, pdf.get());
+        if (!env.form) { r.error = L"The form in this PDF could not be read."; return false; }
+        std::map<int, std::vector<const Json*>> byPage;
+        for (auto& f : fields.arr) byPage[int(f[L"page"].Num())].push_back(&f);
+        for (auto& [pg, changes] : byPage) {
+            if (badPage(pg)) return false;
+            FPDF_PAGE page = api->FPDF_LoadPage(pdf.get(), pg);
+            if (!page) { r.error = L"Could not open page " + std::to_wstring(pg + 1) + L"."; return false; }
+            api->FORM_OnAfterLoadPage(page, env.form);
+            bool ok = FillPage(api, env, page, changes);
+            api->FORM_OnBeforeClosePage(page, env.form);
+            api->FPDF_ClosePage(page);
+            if (!ok) { r.error = L"Could not fill the form on page " + std::to_wstring(pg + 1) + L"."; return false; }
+        }
+        r.error.clear();
+    }
+    p.Set(0.3);
+    for (auto& t : texts.arr) {
+        int pg = int(t[L"page"].Num());
+        if (badPage(pg)) return false;
+        FPDF_PAGE page = api->FPDF_LoadPage(pdf.get(), pg);
+        bool ok = page && PlaceText(api, pdf.get(), page, t[L"x"].Num(), t[L"y"].Num(), std::clamp(t[L"size"].Num(12), 4.0, 200.0), t[L"text"].Str())
+               && api->FPDFPage_GenerateContent(page);
+        if (page) api->FPDF_ClosePage(page);
+        if (!ok) { r.error = L"Could not add the text on page " + std::to_wstring(pg + 1) + L"."; return false; }
+    }
+    r.error.clear();
     for (size_t i = 0; i < stamps.size(); i++) {
         Stamp& s = stamps[i];
-        if (s.page < 0 || s.page >= pdf.pages()) { r.error = L"This PDF has " + std::to_wstring(pdf.pages()) + L" pages."; return false; }
+        if (badPage(s.page)) return false;
+        r.error.clear();
         Image img;
         std::vector<uint8_t> bytes;
         if (!DecodeImage(s.image, img, bytes, r.error)) return false;
         FPDF_PAGE page = api->FPDF_LoadPage(pdf.get(), s.page);
         if (!page) { r.error = L"Could not open page " + std::to_wstring(s.page + 1) + L"."; return false; }
         if (s.h <= 0) {
-            // Keep the picture's shape on the page as shown (a turned page swaps width and height).
-            double pw = api->FPDF_GetPageWidthF(page), ph = api->FPDF_GetPageHeightF(page);
-            s.h = s.w * img.h / img.w * pw / ph;
+            // Keep the picture's shape on the page as shown.
+            PageBox box(api, page);
+            s.h = s.w * img.h / img.w * box.shownW() / box.shownH();
         }
         bool ok = PlaceImage(api, pdf.get(), page, s, img) && api->FPDFPage_GenerateContent(page);
         api->FPDF_ClosePage(page);
         if (!ok) { r.error = L"Could not put the picture on page " + std::to_wstring(s.page + 1) + L"."; return false; }
-        p.Set(0.8 * double(i + 1) / double(stamps.size()));
+        p.Set(0.3 + 0.5 * double(i + 1) / double(stamps.size()));
     }
     std::vector<uint8_t> out;
     if (!SavePdf(api, pdf.get(), out)) { r.error = L"Could not save the PDF."; return false; }
     r.before = FileSize(in);
-    return WriteOutput(job, in, BaseName(in) + (job.op == L"pdf.sign" ? L" signed" : L" edited"), L".pdf", out, p, r);
+    const wchar_t* suffix = job.op == L"pdf.sign" ? L" signed" : job.op == L"pdf.fill" ? L" filled" : L" edited";
+    return WriteOutput(job, in, BaseName(in) + suffix, L".pdf", out, p, r);
 }
 
 bool RunSplit(const Job& job, const Progress& p, Result& r)
@@ -576,7 +807,8 @@ bool RunPdfTool(const Job& job, const Progress& p, Result& r)
     if (job.op == L"pdf.images") return RunImages(job, p, r);
     if (job.op == L"pdf.rotate") return RunRotate(job, p, r);
     if (job.op == L"pdf.remove") return RunRemovePages(job, p, r);
-    if (job.op == L"pdf.sign" || job.op == L"pdf.picture") return RunStamp(job, p, r);
+    if (job.op == L"pdf.sign" || job.op == L"pdf.picture" || job.op == L"pdf.fill") return RunEdit(job, p, r);
+    if (job.op == L"prep.fields") return RunFields(job, p, r);
     r.error = L"Unknown PDF tool.";
     return false;
 }

@@ -240,6 +240,7 @@ const std::vector<Converter>& Converters()
         { L"pdf.rotate",      WheelKind::Tools, L"Rotate",      Bit(Kind::Pdf), Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.remove",      WheelKind::Tools, L"Remove pages", Bit(Kind::Pdf), Icon::RemovePage, C::PerFile, 1, 0, Popup::Pages, RunPdfTool, Engine::Pdfium },
         { L"pdf.sign",        WheelKind::Tools, L"Sign",        Bit(Kind::Pdf), Icon::Sign, C::PerFile, 1, 1, Popup::Place, RunPdfTool, Engine::Pdfium },
+        { L"pdf.fill",        WheelKind::Tools, L"Fill form",   Bit(Kind::Pdf), Icon::Form, C::PerFile, 1, 1, Popup::Place, RunPdfTool, Engine::Pdfium },
         { L"pdf.picture",     WheelKind::Tools, L"Add picture", Bit(Kind::Pdf), Icon::Picture, C::PerFile, 1, 1, Popup::Place, RunPdfTool, Engine::Pdfium },
         { L"tool.extract",    WheelKind::Tools, L"Extract",     kArchives, Icon::Extract, C::PerFile, 1, 0, Popup::None, RunExtract },
         { L"media.trim",      WheelKind::Tools, L"Trim",        kAudio | kVideo, Icon::Trim, C::PerFile, 1, 1, Popup::Trim, RunMedia, Engine::Ffmpeg },
@@ -264,6 +265,7 @@ const std::vector<Converter>& Converters()
         { L"pack.targz",   WheelKind::Actions, L"TAR.GZ",    kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         { L"pack.tar",     WheelKind::Actions, L"TAR",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
         // Not on any wheel (accepts nothing): a downscaled PNG for Float and the crop popup.
+        { L"prep.fields",  WheelKind::Actions, L"", 0, Icon::None, C::PerFile, 1, 1, Popup::None, RunPdfTool },
         { L"prep.preview", WheelKind::Actions, L"", 0, Icon::None, C::PerFile, 1, 1, Popup::None, RunPreview },
     };
     return table;

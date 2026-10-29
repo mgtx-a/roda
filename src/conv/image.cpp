@@ -765,7 +765,7 @@ bool RunPreview(const Job& job, const Progress& p, Result& r)
         // A PDF's page (the first unless asked), drawn at the size the preview needs.
         int pages = 0;
         if (!PdfPreview(job.inputs[0], Opt(job, L"max", 2048), img, r.error, Opt(job, L"page", 0), &pages)) return false;
-        r.info.Set(L"w", img.w).Set(L"h", img.h).Set(L"pages", pages);
+        r.info.Set(L"w", img.w).Set(L"h", img.h).Set(L"pages", pages).Set(L"pth", img.h * 72.0 / img.dpiY);   // the page's height in points
         if (!EncodeImage(img, Kind::Png, 0, true, out, r.error)) return false;
         return WriteOutput(job, job.inputs[0], L"", L".png", out, p, r);
     }

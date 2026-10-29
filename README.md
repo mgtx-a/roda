@@ -58,7 +58,7 @@ The first time you start Roda, a short tour shows you how it works.
 | Files | Change into | Tools |
 |---|---|---|
 | **Photos** (JPG, PNG, WebP, GIF, BMP, TIFF, ICO, SVG, HEIC, AVIF) | JPG, PNG, WebP, PDF, TIFF, BMP, ICO | Make smaller, resize, crop, rotate, flip, remove photo info, join into one PDF |
-| **PDFs** \* | Pictures (PNG, JPG), text, Word (DOCX), ebook (EPUB), PowerPoint (PPTX), MP3 (read aloud) | Sign (draw with the mouse), add a picture, remove pages, split into pages, take out the pictures, rotate, join PDFs |
+| **PDFs** \* | Pictures (PNG, JPG), text, Word (DOCX), ebook (EPUB), PowerPoint (PPTX), MP3 (read aloud) | Fill in forms, type text, sign (draw with the mouse), add a picture, remove pages, split into pages, take out the pictures, rotate, join PDFs |
 | **Documents** (Word DOCX, Markdown, HTML, RTF, TXT) | Each other, and ebook (EPUB) | |
 | **Word, Excel, PowerPoint** | PDF (only if Microsoft Office is on your PC) | |
 | **Spreadsheets** (Excel XLSX and XLS, ODS, CSV, TSV) | XLSX, ODS, CSV, TSV | |
@@ -70,15 +70,22 @@ The first time you start Roda, a short tour shows you how it works.
 
 \* Full version only.
 
-### Signing a PDF
-Drag a PDF, press **Ctrl**, drop on **Sign**. A window shows the PDF:
-1. Sign on the white pad with your mouse (or pen), then click **Use**.
-2. Drag the signature where you want it. Drag its corner dot to make it bigger or smaller.
-3. Use **‹ ›** to go to another page. You can add more signatures, or pictures with **Add picture…**
-   (a stamp, a logo, a scanned signature).
-4. Click **Save**. You get `report signed.pdf`; the original stays as it was.
+### Sign, fill in or add to a PDF
+Drag a PDF, press **Ctrl**, and drop on **Fill form**, **Sign** or **Add picture**. A window shows the
+PDF, and the same tools are in all three:
 
-This puts a picture of your signature on the page. It is not a certificate-based digital signature.
+- **Form boxes** (in PDFs that have real form fields) are tinted blue. Click one to type, tick it or
+  choose from its list. **Tab** goes to the next box.
+- **Add text** puts a text box on the page: type, then drag it where you want. Drag its corner dot to
+  make the letters bigger or smaller. Works on any PDF, even one without form boxes.
+- **Sign** opens a white pad: sign with your mouse (or pen), click **Use**, then drag the signature
+  into place and resize it with its corner dot.
+- **Picture…** places a PNG or JPG (a stamp, a logo, a scanned signature) the same way.
+- Use **‹ ›** to move between pages. The **×** on something removes it.
+- Click **Save**. You get `report filled.pdf` (or `signed`, `edited`); the original stays as it was.
+
+The signature is a picture on the page, not a certificate-based digital signature. Typed text uses a
+standard font that has Western European letters only.
 
 ### Settings
 Right-click the wheel icon near the clock and choose **Settings**. There you can change:
@@ -144,6 +151,7 @@ Roda can also convert from a script (use `start /wait` in cmd):
     Roda.exe --convert report.pdf outdir\ --op to.png --option dpi=150
     Roda.exe --convert report.pdf outdir\ --op pdf.split
     Roda.exe --convert report.pdf short.pdf --op pdf.remove --option "pages=2, 5-7"
+    Roda.exe --convert form.pdf filled.pdf --op pdf.fill --option "set=name=Ahmad;agree=on;size=M"
     Roda.exe --convert book.xlsx book.csv
     Roda.exe --convert video.mkv video.mp4
     Roda.exe --convert video.mp4 clip.mp4 --op media.trim --option start=12 --option end=45

@@ -250,8 +250,8 @@ struct App {
         };
     }
 
-    /// The Sign window: pages come from quiet preview jobs, Save submits the placements.
-    void OpenPlace(const WheelOption& o, const wstring& pdf, bool draw)
+    /// The PDF editor (Sign, Add picture, Fill form): pages and fields come from quiet jobs, Save submits.
+    void OpenPlace(const WheelOption& o, const wstring& pdf, PlaceWindow::Mode mode)
     {
         placeUi.onNeedPage = [this, pdf](int page) {
             Job j = MakeJob(L"prep.preview", { pdf }, Json::Object().Set(L"max", 1600).Set(L"page", page));
@@ -261,11 +261,17 @@ struct App {
             int id = jobs.Submit(j, FileName(pdf), L"Page", true);
             waiting[id] = [this, page](const JobState& s) {
                 if (s.phase != JobState::Done) { placeUi.PageFailed(s.error); return; }
-                placeUi.SetPage(page, s.out, int(s.info[L"info"][L"pages"].Num(1)));
+                placeUi.SetPage(page, s.out, int(s.info[L"info"][L"pages"].Num(1)), s.info[L"info"][L"pth"].Num(0));
             };
         };
+        placeUi.onNeedFields = [this, pdf] {
+            Job j = MakeJob(L"prep.fields", { pdf }, Json::Object());
+            j.outDir.clear();
+            int id = jobs.Submit(j, FileName(pdf), L"Fields", true);
+            waiting[id] = [this](const JobState& s) { if (s.phase == JobState::Done) placeUi.SetFields(s.info[L"info"][L"fields"]); };
+        };
         placeUi.onSave = [this, o, pdf](const Json& opts) { Submit(o, { pdf }, opts); };
-        placeUi.Show(pdf, draw);
+        placeUi.Show(pdf, mode);
     }
 
     std::vector<wstring> opened;     // paths from "Roda…" in Explorer, gathered for a moment
@@ -323,7 +329,10 @@ struct App {
             return;
         }
         if (c->popup == Popup::None) { Submit(o, paths, Json::Object()); return; }
-        if (c->popup == Popup::Place) { OpenPlace(o, paths[0], id == L"pdf.sign"); return; }
+        if (c->popup == Popup::Place) {
+            OpenPlace(o, paths[0], id == L"pdf.sign" ? PlaceWindow::Mode::Sign : id == L"pdf.fill" ? PlaceWindow::Mode::Fill : PlaceWindow::Mode::Picture);
+            return;
+        }
 
         // Options first: the popup opens where the wheel was.
         popup.onApply = [this, o, paths](const Json& opts) {

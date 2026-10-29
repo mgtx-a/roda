@@ -139,6 +139,15 @@ if [ -f "$(dirname "$EXE")/engines/pdfium.dll" ]; then
   info "$P/stamped.pdf"; [ "$(field pages)" = "3" ] && [ "$(field bytes)" -gt 9000 ] && ok || bad "picture on page 2: $INFO"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/stamped2.pdf")" --op pdf.sign --option "image=$(win "$CORPUS/photo.png")" --option page=7
   [ $RC -eq 1 ] && grep -q "has 3 pages" <<<"$OUT" && ok || bad "picture on page 7 of 3 must fail: $OUT"
+  # Fill form: a text box, a checkbox, a radio button and a dropdown, then read back as text.
+  roda --convert "$(win "$CORPUS/form.pdf")" "$(win "$P/filled.pdf")" --op pdf.fill --option "set=name=Ahmad bin Ali;agree=on;size=M;colour=Blue"
+  [ $RC -eq 0 ] && ok || bad "fill form: $OUT"
+  grep -aq "Ahmad bin Ali" "$P/filled.pdf" && grep -aq "/V */M" "$P/filled.pdf" && ok || bad "the filled values are not in the PDF"
+  roda --convert "$(win "$CORPUS/form.pdf")" "$(win "$P/nofield.pdf")" --op pdf.fill --option "set=nosuch=1"
+  [ $RC -eq 1 ] && grep -q "No field" <<<"$OUT" && ok || bad "unknown field must fail: $OUT"
+  # Typed text on a page without fields.
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/typed.pdf")" --op pdf.fill --option "text=Checked by Roda" --option page=3 --option x=0.1 --option y=0.9
+  convert "$P/typed.pdf" "$P/typed.txt" --op to.txt && has "$P/typed.txt" "Checked by Roda"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/rot.pdf")" --op pdf.rotate
   info "$P/rot.pdf"; [ "$(field pages)" = "3" ] && ok || bad "rotate: $INFO"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$CORPUS/photo.jpg")" "$(win "$CORPUS/long.pdf")" "$(win "$P/merged.pdf")"

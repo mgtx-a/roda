@@ -4,7 +4,9 @@
 #pragma once
 #include "conv.h"
 
+#include <fpdf_annot.h>
 #include <fpdf_doc.h>
+#include <fpdf_formfill.h>
 #include <fpdf_edit.h>
 #include <fpdf_ppo.h>
 #include <fpdf_save.h>
@@ -26,7 +28,13 @@ namespace rd {
     X(FPDFImageObj_GetImageDataRaw) X(FPDFImageObj_GetImageFilterCount) X(FPDFImageObj_GetImageFilter) \
     X(FPDFFormObj_CountObjects) X(FPDFFormObj_GetObject) \
     X(FPDFPageObj_NewImageObj) X(FPDFImageObj_SetBitmap) X(FPDFPageObj_SetMatrix) X(FPDFPage_InsertObject) \
-    X(FPDFPage_GenerateContent) X(FPDFPage_GetCropBox) X(FPDFPage_GetMediaBox)
+    X(FPDFPage_GenerateContent) X(FPDFPage_GetCropBox) X(FPDFPage_GetMediaBox) \
+    X(FPDFDOC_InitFormFillEnvironment) X(FPDFDOC_ExitFormFillEnvironment) X(FORM_OnAfterLoadPage) X(FORM_OnBeforeClosePage) \
+    X(FPDFPage_GetAnnotCount) X(FPDFPage_GetAnnot) X(FPDFPage_CloseAnnot) X(FPDFAnnot_GetSubtype) X(FPDFAnnot_GetRect) \
+    X(FPDFAnnot_GetFormFieldType) X(FPDFAnnot_GetFormFieldName) X(FPDFAnnot_GetFormFieldAlternateName) X(FPDFAnnot_GetFormFieldValue) X(FPDFAnnot_GetFormFieldExportValue) \
+    X(FPDFAnnot_GetFormFieldFlags) X(FPDFAnnot_GetOptionCount) X(FPDFAnnot_GetOptionLabel) X(FPDFAnnot_IsChecked) \
+    X(FORM_SetFocusedAnnot) X(FORM_SelectAllText) X(FORM_ReplaceSelection) X(FORM_ForceToKillFocus) X(FORM_SetIndexSelected) \
+    X(FORM_OnLButtonDown) X(FORM_OnLButtonUp) X(FPDF_FFLDraw) X(FPDFText_LoadStandardFont) X(FPDFPageObj_CreateTextObj) X(FPDFText_SetText) X(FPDFFont_Close)
 
 struct Pdfium {
 #define RD_PDFIUM_MEMBER(name) decltype(&::name) name = nullptr;
@@ -46,9 +54,13 @@ public:
     FPDF_DOCUMENT get() const { return doc_; }
     int pages() const;
     const Pdfium* api() const { return p_; }
+    /// PDFium's form engine for this document (made on first use): form fields are only drawn through it.
+    FPDF_FORMHANDLE form() const;
 private:
     const Pdfium* p_ = nullptr;
     FPDF_DOCUMENT doc_ = nullptr;
+    mutable FPDF_FORMFILLINFO formInfo_{};
+    mutable FPDF_FORMHANDLE form_ = nullptr;
     std::vector<uint8_t> bytes_;
 };
 
