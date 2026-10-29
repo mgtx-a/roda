@@ -565,6 +565,35 @@ bool WriteOds(const Book& book, std::vector<uint8_t>& out)
 
 }  // namespace
 
+bool WriteRowsXlsx(const std::vector<std::vector<wstring>>& rows, std::vector<uint8_t>& out)
+{
+    // Table text from a PDF: "1,234.50" and "(12.00)" are numbers there, as an accountant writes them.
+    auto number = [](wstring s) {
+        bool negative = s.size() > 2 && s.front() == L'(' && s.back() == L')';
+        if (negative) s = s.substr(1, s.size() - 2);
+        size_t dot = s.find(L'.');
+        wstring whole = s.substr(0, dot);
+        bool grouped = whole.size() > 4 && whole.find(L',') != wstring::npos;
+        for (size_t i = whole.size(), k = 0; grouped && i-- > 0; k++)
+            grouped = (k % 4 == 3) ? whole[i] == L',' : iswdigit(whole[i]) != 0;
+        if (grouped) { s.erase(std::remove(s.begin(), s.begin() + long(whole.size()), L','), s.begin() + long(whole.size())); }
+        Cell c = Guess(s);
+        if (c.t == Cell::Num && negative) c.n = -c.n;
+        return c;
+    };
+    Book book(1);
+    book[0].name = L"Sheet1";
+    for (size_t r = 0; r < rows.size(); r++) {
+        book[0].rows.emplace_back();
+        for (size_t c = 0; c < rows[r].size(); c++) {
+            Cell cell = number(rows[r][c]);
+            if (cell.t != Cell::Num) cell = rows[r][c].empty() ? Cell{} : Cell{ Cell::Str, rows[r][c], 0 };
+            book[0].Put(r, c, cell);
+        }
+    }
+    return WriteXlsx(book, out);
+}
+
 bool RunSheetTo(const Job& job, Kind kind, const wstring& target, const Progress& p, Result& r)
 {
     const wstring& in = job.inputs[0];

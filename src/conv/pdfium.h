@@ -22,7 +22,7 @@ namespace rd {
     X(FPDFBitmap_CreateEx) X(FPDFBitmap_FillRect) X(FPDFBitmap_GetBuffer) X(FPDFBitmap_GetStride) \
     X(FPDFBitmap_GetWidth) X(FPDFBitmap_GetHeight) X(FPDFBitmap_GetFormat) X(FPDFBitmap_Destroy) X(FPDF_RenderPageBitmap) \
     X(FPDFText_LoadPage) X(FPDFText_ClosePage) X(FPDFText_CountChars) X(FPDFText_GetUnicode) X(FPDFText_GetFontSize) \
-    X(FPDFText_GetCharBox) X(FPDFText_GetFontWeight) X(FPDFText_GetFontInfo) X(FPDFImageObj_GetImageDataDecoded) \
+    X(FPDFText_GetCharBox) X(FPDFText_GetLooseCharBox) X(FPDFText_GetFontWeight) X(FPDFText_GetFontInfo) X(FPDFImageObj_GetImageDataDecoded) \
     X(FPDF_CreateNewDocument) X(FPDF_ImportPages) X(FPDF_SaveAsCopy) X(FPDFPage_GetRotation) X(FPDFPage_SetRotation) \
     X(FPDFPage_CountObjects) X(FPDFPage_GetObject) X(FPDFPageObj_GetType) X(FPDFImageObj_GetBitmap) \
     X(FPDFImageObj_GetImageDataRaw) X(FPDFImageObj_GetImageFilterCount) X(FPDFImageObj_GetImageFilter) \

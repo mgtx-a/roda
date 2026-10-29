@@ -201,7 +201,7 @@ const std::vector<Converter>& Converters()
         { L"to.txt",  WheelKind::Convert, L"TXT",  Bit(Kind::Pdf) | kDocs | kSubtitles, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.epub", WheelKind::Convert, L"EPUB", Bit(Kind::Pdf) | Bit(Kind::Docx) | Bit(Kind::Txt) | Bit(Kind::Markdown), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.pptx", WheelKind::Convert, L"PPTX", Bit(Kind::Pdf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
-        { L"to.xlsx", WheelKind::Convert, L"XLSX", kSheets, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
+        { L"to.xlsx", WheelKind::Convert, L"XLSX", kSheets | Bit(Kind::Pdf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.ods",  WheelKind::Convert, L"ODS",  kSheets, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.csv",  WheelKind::Convert, L"CSV",  kSheets, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.tsv",  WheelKind::Convert, L"TSV",  kSheets, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },

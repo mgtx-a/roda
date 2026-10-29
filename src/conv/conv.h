@@ -22,6 +22,7 @@ bool WavToMp3(const wstring& wav, std::vector<uint8_t>& mp3, const Progress& p, 
 // speech.cpp
 bool SpeakToWav(const wstring& text, const wstring& wavPath, const Progress& p, wstring& err);   // Windows' own voice, offline
 struct Image;
+bool WriteRowsXlsx(const std::vector<std::vector<wstring>>& rows, std::vector<uint8_t>& out);   // sheet.cpp: text rows, numbers recognised
 bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err, int page = 0, int* pages = nullptr);
 
 // archive.cpp

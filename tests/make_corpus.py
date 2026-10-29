@@ -210,6 +210,13 @@ with open(path("sample.srt"), "w", encoding="utf-8") as f:
 with open(path("sample.vtt"), "w", encoding="utf-8") as f:
     f.write("WEBVTT\n\nNOTE a comment\n\nintro\n00:01.000 --> 00:03.500 align:start\nHi &amp; welcome.\n\n00:00:04.000 --> 00:00:06.000\nSecond cue.\n")
 
+# A table (PDF to XLSX): a title, a header, numbers with thousands separators, a negative in brackets.
+from reportlab.platypus import Table
+SimpleDocTemplate(path("table.pdf"), pagesize=A4).build([
+    Paragraph("Price list for October", styles["Title"]),
+    Table([["Item", "Qty", "Price"], ["apple", "3", "1.50"], ["pear", "12", "1,234.50"], ["refund", "1", "(20.00)"]], colWidths=[150, 60, 90]),
+])
+
 # A form with real fields (Fill form): a text box, a checkbox, two radio buttons and a dropdown.
 c = canvas.Canvas(path("form.pdf"), pagesize=A4)
 c.setFont("Helvetica", 12)

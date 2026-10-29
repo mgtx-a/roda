@@ -345,6 +345,108 @@ bool RunRemovePages(const Job& job, const Progress& p, Result& r)
     return WriteOutput(job, in, BaseName(in) + L" pages removed", L".pdf", bytes, p, r);
 }
 
+/// One character on the page, where it is (points, y up).
+struct Glyph {
+    double l, r, b, t, size;
+    wstring c;
+};
+
+/// A page as rows of cells, for a spreadsheet: characters are grouped into lines by height, lines into
+/// cells at wide gaps, and cells into columns where the table's lines all leave the same space empty.
+std::vector<std::vector<wstring>> PageTable(const Pdfium* p, FPDF_PAGE page)
+{
+    std::vector<std::vector<wstring>> rows;
+    FPDF_TEXTPAGE tp = p->FPDFText_LoadPage(page);
+    if (!tp) return rows;
+    std::vector<Glyph> glyphs;
+    for (int i = 0, n = p->FPDFText_CountChars(tp); i < n; i++) {
+        unsigned u = p->FPDFText_GetUnicode(tp, i);
+        // The loose box spans the letter's whole width (its advance), so the gaps between boxes are real spaces.
+        FS_RECTF box{};
+        if (u <= L' ' || u == 0xFFFE || u == 0xA0 || !p->FPDFText_GetLooseCharBox(tp, i, &box)) continue;
+        double l = box.left, r = box.right, b = box.bottom, t = box.top;
+        wstring ch;
+        if (u >= 0x10000) { u -= 0x10000; ch += wchar_t(0xD800 + (u >> 10)); ch += wchar_t(0xDC00 + (u & 0x3FF)); }
+        else ch = wchar_t(u);
+        double size = std::max(1.0, p->FPDFText_GetFontSize(tp, i));
+        glyphs.push_back({ l, r, b, t, size, ch });
+    }
+    p->FPDFText_ClosePage(tp);
+    if (glyphs.empty()) return rows;
+
+    // Lines: top to bottom, a character joins the line whose middle is within half its size.
+    std::sort(glyphs.begin(), glyphs.end(), [](const Glyph& a, const Glyph& b) { return (a.b + a.t) > (b.b + b.t); });
+    std::vector<std::vector<Glyph>> lines;
+    double mid = 1e9;
+    for (auto& g : glyphs) {
+        double m = (g.b + g.t) / 2;
+        if (lines.empty() || std::fabs(m - mid) > g.size * 0.5) { lines.emplace_back(); mid = m; }
+        lines.back().push_back(g);
+    }
+
+    // Cells: a gap wider than about a letter starts a new cell; a smaller one is a space.
+    struct CellBox { double l, r; wstring text; };
+    std::vector<std::vector<CellBox>> cells;
+    for (auto& line : lines) {
+        std::sort(line.begin(), line.end(), [](const Glyph& a, const Glyph& b) { return a.l < b.l; });
+        cells.emplace_back();
+        for (size_t i = 0; i < line.size(); i++) {
+            const Glyph& g = line[i];
+            double gap = i ? g.l - line[i - 1].r : 1e9;
+            if (gap > g.size * 0.9) cells.back().push_back({ g.l, g.r, g.c });
+            else {
+                if (gap > g.size * 0.12) cells.back().back().text += L' ';
+                cells.back().back().text += g.c;
+                cells.back().back().r = std::max(cells.back().back().r, g.r);
+            }
+        }
+    }
+
+    // A bullet on its own is part of the text after it, not a column.
+    for (auto& row : cells)
+        for (size_t i = 0; i + 1 < row.size(); i++)
+            if (row[i].text.size() == 1 && wcschr(L"•●◦▪–-*", row[i].text[0])) {
+                row[i + 1].text = row[i].text + L" " + row[i + 1].text;
+                row[i + 1].l = row[i].l;
+                row.erase(row.begin() + long(i));
+            }
+
+    // Columns: where no line of the table (a line with two or more cells) has ink, there's a border.
+    double minX = 1e9, maxX = -1e9;
+    int tableLines = 0;
+    for (auto& row : cells) if (row.size() >= 2) { tableLines++; for (auto& c : row) { minX = std::min(minX, c.l); maxX = std::max(maxX, c.r); } }
+    std::vector<double> borders;
+    if (tableLines > 0) {
+        const double step = 0.5;
+        size_t bins = size_t((maxX - minX) / step) + 2;
+        std::vector<int> cover(bins, 0);
+        for (auto& row : cells)
+            if (row.size() >= 2)
+                for (auto& c : row)
+                    for (size_t k = size_t((c.l - minX) / step); k <= size_t((c.r - minX) / step) && k < bins; k++) cover[k]++;
+        int allowed = tableLines / 20;   // a heading that spans columns now and then doesn't close a gap
+        for (size_t k = 0; k < bins;) {
+            if (cover[k] > allowed) { k++; continue; }
+            size_t e = k;
+            while (e < bins && cover[e] <= allowed) e++;
+            if (k > 0 && e < bins) borders.push_back(minX + (k + e) / 2.0 * step);
+            k = e;
+        }
+    }
+    auto columnOf = [&](double x) { return size_t(std::upper_bound(borders.begin(), borders.end(), x) - borders.begin()); };
+    for (auto& row : cells) {
+        std::vector<wstring> out;
+        for (auto& c : row) {
+            // A lone line wider than a column (a title, a paragraph) starts at the left.
+            size_t col = row.size() == 1 && columnOf(c.l) != columnOf(c.r) ? 0 : columnOf((c.l + c.r) / 2);
+            if (out.size() <= col) out.resize(col + 1);
+            out[col] += (out[col].empty() ? L"" : L" ") + c.text;
+        }
+        rows.push_back(std::move(out));
+    }
+    return rows;
+}
+
 /// A page's visible box and turn: converts between the page as shown (u right, v down, 0..1, what
 /// the Sign window works in) and the page's own coordinates (points, y up, before /Rotate).
 struct PageBox {
@@ -759,6 +861,23 @@ bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& 
             p.Set(0.98 * (i + 1) / pages);
         }
         return f.End(r);
+    }
+    if (target == L"xlsx") {
+        // Tables: every page's rows, one after another, a blank row between pages.
+        std::vector<std::vector<wstring>> rows;
+        for (int i = 0; i < pages; i++) {
+            FPDF_PAGE page = pdf.api()->FPDF_LoadPage(pdf.get(), i);
+            if (!page) continue;
+            auto t = PageTable(pdf.api(), page);
+            pdf.api()->FPDF_ClosePage(page);
+            if (!rows.empty() && !t.empty()) rows.emplace_back();
+            rows.insert(rows.end(), t.begin(), t.end());
+            p.Set(0.9 * (i + 1) / pages);
+        }
+        if (rows.empty()) { r.error = L"This PDF has no text to put in a spreadsheet (it may be scanned pages)."; return false; }
+        std::vector<uint8_t> out;
+        if (!WriteRowsXlsx(rows, out)) { r.error = L"Could not write the workbook."; return false; }
+        return WriteOutput(job, in, base, L".xlsx", out, p, r);
     }
     if (target == L"pptx") {
         std::vector<Image> slides;
