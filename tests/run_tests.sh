@@ -148,9 +148,11 @@ if [ -f "$(dirname "$EXE")/engines/pdfium.dll" ]; then
   # Typed text on a page without fields.
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/typed.pdf")" --op pdf.fill --option "text=Checked by Roda" --option page=3 --option x=0.1 --option y=0.9
   convert "$P/typed.pdf" "$P/typed.txt" --op to.txt && has "$P/typed.txt" "Checked by Roda"
-  # PDF to XLSX: the table's columns, and numbers as numbers (read back through CSV).
+  # PDF to XLSX: laid out like the page, so empty spacer columns sit between the values; the values come
+  # in order, numbers as numbers (read back through CSV, the empty columns squeezed out).
   convert "$CORPUS/table.pdf" "$P/table.xlsx" && convert "$P/table.xlsx" "$P/table.csv" --op to.csv && {
-    has "$P/table.csv" "Item,Qty,Price"; has "$P/table.csv" "pear,12,1234.5"; has "$P/table.csv" "refund,1,-20"; }
+    tr -s ',' < "$P/table.csv" | sed 's/^,//; s/,\r\?$//' > "$P/table-squeezed.csv"
+    has "$P/table-squeezed.csv" "Item,Qty,Price"; has "$P/table-squeezed.csv" "pear,12,1234.5"; has "$P/table-squeezed.csv" "refund,1,-20"; }
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/rot.pdf")" --op pdf.rotate
   info "$P/rot.pdf"; [ "$(field pages)" = "3" ] && ok || bad "rotate: $INFO"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$CORPUS/photo.jpg")" "$(win "$CORPUS/long.pdf")" "$(win "$P/merged.pdf")"

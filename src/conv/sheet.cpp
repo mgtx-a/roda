@@ -565,10 +565,11 @@ bool WriteOds(const Book& book, std::vector<uint8_t>& out)
 
 }  // namespace
 
-bool WriteRowsXlsx(const std::vector<std::vector<wstring>>& rows, std::vector<uint8_t>& out)
+bool WritePageSheets(const std::vector<PageSheet>& pages, std::vector<uint8_t>& out)
 {
     // Table text from a PDF: "1,234.50" and "(12.00)" are numbers there, as an accountant writes them.
-    auto number = [](wstring s) {
+    // The format keeps them looking the same: 10.00 stays 10.00, not 10.
+    auto number = [](wstring s, std::string& format) {
         bool negative = s.size() > 2 && s.front() == L'(' && s.back() == L')';
         if (negative) s = s.substr(1, s.size() - 2);
         size_t dot = s.find(L'.');
@@ -579,19 +580,187 @@ bool WriteRowsXlsx(const std::vector<std::vector<wstring>>& rows, std::vector<ui
         if (grouped) { s.erase(std::remove(s.begin(), s.begin() + long(whole.size()), L','), s.begin() + long(whole.size())); }
         Cell c = Guess(s);
         if (c.t == Cell::Num && negative) c.n = -c.n;
+        format = std::string(grouped ? "#,##0" : "0") + (dot == wstring::npos ? "" : "." + std::string(s.size() - s.find(L'.') - 1, '0'));
+        if (negative) format += ";(" + format + ")";
         return c;
     };
-    Book book(1);
-    book[0].name = L"Sheet1";
-    for (size_t r = 0; r < rows.size(); r++) {
-        book[0].rows.emplace_back();
-        for (size_t c = 0; c < rows[r].size(); c++) {
-            Cell cell = number(rows[r][c]);
-            if (cell.t != Cell::Num) cell = rows[r][c].empty() ? Cell{} : Cell{ Cell::Str, rows[r][c], 0 };
-            book[0].Put(r, c, cell);
+    auto hex = [](uint32_t c) { char b[9]; snprintf(b, sizeof b, "FF%06X", unsigned(c & 0xFFFFFF)); return std::string(b); };
+    auto num = [](double v) { char b[32]; snprintf(b, sizeof b, "%.4g", v); return std::string(b); };
+    auto fontXml = [&](const PageSheet::Piece& f, const char* nameTag) {
+        return std::string(f.bold ? "<b/>" : "") + (f.italic ? "<i/>" : "") + "<sz val=\"" + num(std::round(f.size * 2) / 2) + "\"/><color rgb=\"" + hex(f.color) +
+               "\"/><" + nameTag + " val=\"" + XmlEscape(f.font.empty() ? L"Arial" : f.font) + "\"/>";
+    };
+    // Styles, each written once: index 0 of every list is the plain default.
+    std::vector<std::string> fonts{ "<font><sz val=\"11\"/><name val=\"Calibri\"/></font>" };
+    std::vector<std::string> fills{ "<fill><patternFill patternType=\"none\"/></fill>", "<fill><patternFill patternType=\"gray125\"/></fill>" };
+    std::vector<std::string> borders{ "<border><left/><right/><top/><bottom/><diagonal/></border>" };
+    std::vector<std::string> formats, xfs{ "<xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/>" };
+    auto id = [](std::vector<std::string>& list, const std::string& x) {
+        size_t i = size_t(std::find(list.begin(), list.end(), x) - list.begin());
+        if (i == list.size()) list.push_back(x);
+        return i;
+    };
+
+    std::string pre = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>";
+    const std::string rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    ZipOut z;
+    std::string sheetsXml, relsXml, typesXml;
+    bool ok = true;
+    size_t media = 0;
+    for (size_t i = 0; i < pages.size(); i++) {
+        const PageSheet& pg = pages[i];
+        std::string n = std::to_string(i + 1);
+        // What each cell holds: a piece of text, a border, a fill.
+        struct Out { const PageSheet::Text* text = nullptr; PageSheet::Edge edge; uint32_t fill = 0; bool filled = false; };
+        std::map<std::pair<size_t, size_t>, Out> cells;
+        for (auto& t : pg.texts) cells[{ t.row, t.col }].text = &t;
+        for (auto& [at, e] : pg.borders) cells[at].edge = e;
+        for (auto& [at, f] : pg.fills) { cells[at].fill = f; cells[at].filled = true; }
+
+        // Merged cells. Text that spans rows gets them, as far across as it reaches. Excel never lets a
+        // number spill into the next cell (it shows ####), so each number also gets the free room beside
+        // it: to its left when it is right-aligned, else to its right, up to the next line drawn or piece
+        // of text. Nothing is merged over another piece of text.
+        std::map<std::pair<size_t, size_t>, std::pair<size_t, size_t>> mergedTo;   // a cell -> the last row and column it covers
+        auto isNumber = [&](const PageSheet::Text& t) { std::string f; return t.pieces.size() == 1 && number(t.pieces[0].text, f).t == Cell::Num; };
+        auto empty = [&](const PageSheet::Text& t, size_t r0, size_t r1, size_t c) {
+            for (size_t r = r0; r <= r1; r++) { auto it = cells.find({ r, c }); if (it != cells.end() && it->second.text && it->second.text != &t) return false; }
+            return true;
+        };
+        auto wall = [&](size_t r, size_t c) {   // a line drawn between columns c - 1 and c
+            auto a = pg.borders.find({ r, c }), b = pg.borders.find({ r, c - 1 });
+            return (a != pg.borders.end() && (a->second.sides & 1)) || (b != pg.borders.end() && (b->second.sides & 2));
+        };
+        for (auto& t : pg.texts) {
+            size_t a = t.col, b = t.col, rows = t.rowEnd;
+            for (size_t c = t.col; c <= t.colEnd && rows > t.row; c++) if (!empty(t, t.row, rows, c)) rows = t.row;   // in the way: one row
+            while (b < t.colEnd && empty(t, t.row, rows, b + 1)) b++;
+            if (isNumber(t)) {
+                if (t.right) while (a > 0 && empty(t, t.row, rows, a - 1) && !wall(t.row, a)) a--;
+                else while (b + 1 < pg.colW.size() && empty(t, t.row, rows, b + 1) && !wall(t.row, b + 1)) b++;
+            } else if (rows == t.row) b = t.col;   // one row: text spills over on its own
+            if (a != t.col) { cells[{ t.row, t.col }].text = nullptr; cells[{ t.row, a }].text = &t; }
+            if (b > a || rows > t.row) mergedTo[{ t.row, a }] = { rows, b };
         }
+
+        std::string merges;
+        size_t mergeCount = 0;
+        std::vector<std::string> rowXml(pg.rowH.size());
+        for (auto& [at, o] : cells) {
+            if (at.first >= rowXml.size()) continue;
+            std::string ref = ColumnName(at.second) + std::to_string(at.first + 1);
+            std::string format, value, type;
+            const PageSheet::Piece* font = o.text ? &o.text->pieces.front() : nullptr;
+            bool right = false, left = false;
+            if (auto m = mergedTo.find(at); o.text && m != mergedTo.end()) {
+                merges += "<mergeCell ref=\"" + ref + ":" + ColumnName(m->second.second) + std::to_string(m->second.first + 1) + "\"/>";
+                mergeCount++;
+            }
+            if (o.text) {
+                wstring plain;
+                for (auto& piece : o.text->pieces) plain += piece.text;
+                Cell c = o.text->pieces.size() == 1 ? number(plain, format) : Cell{};
+                if (c.t == Cell::Num) {
+                    value = "<v>" + Narrow(NumberText(c.n)) + "</v>";
+                    right = o.text->right;
+                    left = !right;   // Excel puts numbers on the right unless told
+                } else {
+                    format.clear();
+                    type = " t=\"inlineStr\"";
+                    if (o.text->pieces.size() == 1) value = "<is><t xml:space=\"preserve\">" + XmlEscape(plain) + "</t></is>";
+                    else {
+                        value = "<is>";
+                        for (auto& piece : o.text->pieces) value += "<r><rPr>" + fontXml(piece, "rFont") + "</rPr><t xml:space=\"preserve\">" + XmlEscape(piece.text) + "</t></r>";
+                        value += "</is>";
+                    }
+                }
+            }
+            size_t fontId = font ? id(fonts, "<font>" + fontXml(*font, "name") + "</font>") : 0;
+            size_t fillId = o.filled ? id(fills, "<fill><patternFill patternType=\"solid\"><fgColor rgb=\"" + hex(o.fill) + "\"/><bgColor indexed=\"64\"/></patternFill></fill>") : 0;
+            size_t borderId = 0;
+            if (o.edge.sides) {
+                std::string b = "<border>";
+                for (auto [bit, side] : { std::pair<uint8_t, const char*>{ 1, "left" }, { 2, "right" }, { 4, "top" }, { 8, "bottom" } })
+                    b += o.edge.sides & bit ? std::string("<") + side + " style=\"thin\"><color rgb=\"" + hex(o.edge.color) + "\"/></" + side + ">" : std::string("<") + side + "/>";
+                borderId = id(borders, b + "<diagonal/></border>");
+            }
+            size_t formatId = format.empty() ? 0 : 164 + id(formats, format);
+            size_t xf = id(xfs, "<xf numFmtId=\"" + std::to_string(formatId) + "\" fontId=\"" + std::to_string(fontId) + "\" fillId=\"" + std::to_string(fillId) +
+                                "\" borderId=\"" + std::to_string(borderId) + "\" xfId=\"0\" applyNumberFormat=\"1\" applyFont=\"1\" applyFill=\"1\" applyBorder=\"1\" applyAlignment=\"1\">"
+                                "<alignment" + (right ? " horizontal=\"right\"" : left ? " horizontal=\"left\"" : "") + " vertical=\"center\"/></xf>");
+            rowXml[at.first] += "<c r=\"" + ref + "\" s=\"" + std::to_string(xf) + "\"" + type + (value.empty() ? "/>" : ">" + value + "</c>");
+        }
+        std::string data;
+        for (size_t r = 0; r < rowXml.size(); r++)
+            data += "<row r=\"" + std::to_string(r + 1) + "\" ht=\"" + num(pg.rowH[r]) + "\" customHeight=\"1\">" + rowXml[r] + "</row>";
+        // Column widths are in characters of the default font, 7 pixels each at 96 DPI: a point is 4/3 pixel.
+        std::string cols;
+        for (size_t c = 0; c < pg.colW.size(); c++)
+            cols += "<col min=\"" + std::to_string(c + 1) + "\" max=\"" + std::to_string(c + 1) + "\" width=\"" + num(pg.colW[c] * 4 / 3 / 7) + "\" customWidth=\"1\"/>";
+        if (!cols.empty()) cols = "<cols>" + cols + "</cols>";
+
+        // Pictures, anchored to the cell they start in.
+        std::string drawing, drawingRels;
+        for (size_t k = 0; k < pg.pictures.size(); k++) {
+            const auto& pic = pg.pictures[k];
+            std::string file = "image" + std::to_string(++media) + (pic.ext == L".jpg" ? ".jpeg" : ".png");
+            ok = ok && z.Add("xl/media/" + file, pic.bytes, true);
+            std::string rid = "rId" + std::to_string(k + 1), pid = std::to_string(k + 2);
+            auto emu = [](double pt) { return std::to_string(std::llround(pt * 12700)); };
+            drawingRels += "<Relationship Id=\"" + rid + "\" Type=\"" + rel + "/image\" Target=\"../media/" + file + "\"/>";
+            drawing += "<xdr:oneCellAnchor><xdr:from><xdr:col>" + std::to_string(pic.col) + "</xdr:col><xdr:colOff>" + emu(pic.dx) + "</xdr:colOff><xdr:row>" +
+                       std::to_string(pic.row) + "</xdr:row><xdr:rowOff>" + emu(pic.dy) + "</xdr:rowOff></xdr:from><xdr:ext cx=\"" + emu(pic.w) + "\" cy=\"" + emu(pic.h) + "\"/>"
+                       "<xdr:pic><xdr:nvPicPr><xdr:cNvPr id=\"" + pid + "\" name=\"Picture " + pid + "\"/><xdr:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></xdr:cNvPicPr></xdr:nvPicPr>"
+                       "<xdr:blipFill><a:blip r:embed=\"" + rid + "\"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>"
+                       "<xdr:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + emu(pic.w) + "\" cy=\"" + emu(pic.h) + "\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></xdr:spPr>"
+                       "</xdr:pic><xdr:clientData/></xdr:oneCellAnchor>";
+        }
+        std::string drawingRef;
+        if (!drawing.empty()) {
+            ok = ok && z.Add("xl/drawings/drawing" + n + ".xml", pre + "<xdr:wsDr xmlns:xdr=\"http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing\" "
+                             "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"" + rel + "\">" + drawing + "</xdr:wsDr>")
+                 && z.Add("xl/drawings/_rels/drawing" + n + ".xml.rels", pre + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" + drawingRels + "</Relationships>")
+                 && z.Add("xl/worksheets/_rels/sheet" + n + ".xml.rels", pre + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+                          "<Relationship Id=\"rId1\" Type=\"" + rel + "/drawing\" Target=\"../drawings/drawing" + n + ".xml\"/></Relationships>");
+            typesXml += "<Override PartName=\"/xl/drawings/drawing" + n + ".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawing+xml\"/>";
+            drawingRef = "<drawing r:id=\"rId1\"/>";
+        }
+        // No gridlines, and printed as one page with no margins on the same paper: it looks like the paper it came from.
+        double w = 0, h = 0;
+        for (double x : pg.colW) w += x;
+        for (double y : pg.rowH) h += y;
+        double tall = std::max(w, h), wide = std::min(w, h);
+        std::string paper = std::fabs(tall - 842) < 12 && std::fabs(wide - 595) < 12 ? " paperSize=\"9\"" : std::fabs(tall - 792) < 12 ? " paperSize=\"1\"" : "";
+        if (w > h) paper += " orientation=\"landscape\"";
+        ok = ok && z.Add("xl/worksheets/sheet" + n + ".xml", pre + "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"" + rel + "\">"
+                         "<sheetPr><pageSetUpPr fitToPage=\"1\"/></sheetPr><sheetViews><sheetView showGridLines=\"0\" workbookViewId=\"0\"/></sheetViews>" + cols +
+                         "<sheetData>" + data + "</sheetData>" + (mergeCount ? "<mergeCells count=\"" + std::to_string(mergeCount) + "\">" + merges + "</mergeCells>" : "") +
+                         "<pageMargins left=\"0\" right=\"0\" top=\"0\" bottom=\"0\" header=\"0\" footer=\"0\"/><pageSetup" + paper + " fitToWidth=\"1\" fitToHeight=\"1\"/>" + drawingRef + "</worksheet>");
+        sheetsXml += "<sheet name=\"Page " + n + "\" sheetId=\"" + n + "\" r:id=\"rId" + std::to_string(i + 10) + "\"/>";
+        relsXml += "<Relationship Id=\"rId" + std::to_string(i + 10) + "\" Type=\"" + rel + "/worksheet\" Target=\"worksheets/sheet" + n + ".xml\"/>";
+        typesXml += "<Override PartName=\"/xl/worksheets/sheet" + n + ".xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>";
     }
-    return WriteXlsx(book, out);
+    std::string numFmts;
+    for (size_t k = 0; k < formats.size(); k++) numFmts += "<numFmt numFmtId=\"" + std::to_string(164 + k) + "\" formatCode=\"" + XmlEscape(Widen(formats[k])) + "\"/>";
+    auto list = [](const char* tag, const std::vector<std::string>& items) {
+        std::string s = std::string("<") + tag + " count=\"" + std::to_string(items.size()) + "\">";
+        for (auto& x : items) s += x;
+        return s + "</" + tag + ">";
+    };
+    ok = ok && z.Add("[Content_Types].xml", pre + "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+        "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>"
+        "<Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"jpeg\" ContentType=\"image/jpeg\"/>"
+        "<Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/>"
+        "<Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/>" + typesXml + "</Types>")
+        && z.Add("_rels/.rels", pre + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+        "<Relationship Id=\"rId1\" Type=\"" + rel + "/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>")
+        && z.Add("xl/workbook.xml", pre + "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"" + rel + "\"><sheets>" + sheetsXml + "</sheets></workbook>")
+        && z.Add("xl/_rels/workbook.xml.rels", pre + "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">"
+        "<Relationship Id=\"rId1\" Type=\"" + rel + "/styles\" Target=\"styles.xml\"/>" + relsXml + "</Relationships>")
+        && z.Add("xl/styles.xml", pre + "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">" + (numFmts.empty() ? "" :
+        "<numFmts count=\"" + std::to_string(formats.size()) + "\">" + numFmts + "</numFmts>") + list("fonts", fonts) + list("fills", fills) + list("borders", borders) +
+        "<cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs>" + list("cellXfs", xfs) + "</styleSheet>");
+    return ok && z.Finish(out);
 }
 
 bool RunSheetTo(const Job& job, Kind kind, const wstring& target, const Progress& p, Result& r)

@@ -5,6 +5,8 @@
 #include "pdfium.h"
 
 #include <map>
+#include <set>
+#include <tuple>
 
 namespace rd {
 
@@ -51,12 +53,53 @@ struct Line {
     wstring Text() const { wstring t; for (auto& s : spans) t += s.text; return t; }
 };
 
+/// Bold and italic from a character's font (its weight, name and flags), and the font's family ("Arial").
+void CharStyle(const Pdfium* p, FPDF_TEXTPAGE tp, int i, bool& bold, bool& italic, wstring* family = nullptr)
+{
+    char font[128] = "";
+    int flags = 0;
+    p->FPDFText_GetFontInfo(tp, i, font, sizeof font, &flags);
+    std::string f = font;
+    for (auto& c : f) c = char(tolower(uint8_t(c)));
+    bold = p->FPDFText_GetFontWeight(tp, i) >= 600 || f.find("bold") != std::string::npos || f.find("black") != std::string::npos ||
+           f.find("heavy") != std::string::npos || (flags & (1 << 18)) != 0;
+    italic = f.find("italic") != std::string::npos || f.find("oblique") != std::string::npos || (flags & (1 << 6)) != 0;
+    if (!family) return;
+    // "ABCDEF+Arial-BoldMT" -> "Arial": no subset tag, no style, no foundry suffix.
+    std::string name = font;
+    if (name.size() > 7 && name[6] == '+') name.erase(0, 7);
+    name = name.substr(0, name.find_first_of("-,"));
+    for (const char* tail : { "MT", "PS", "PSMT" })
+        if (name.size() > strlen(tail) + 2 && name.compare(name.size() - strlen(tail), std::string::npos, tail) == 0) name.resize(name.size() - strlen(tail));
+    if (name.empty() || name == "Helvetica") name = "Arial";   // what Windows has for it
+    *family = Widen(name);
+}
+
+/// A character's font size as the page shows it. PDFium gives the font's own size, before the text is
+/// stretched (some PDFs draw all text at size 1 and stretch it to 7): then the letter's height says it.
+double ShownSize(const Pdfium* p, FPDF_TEXTPAGE tp, int i)
+{
+    double size = p->FPDFText_GetFontSize(tp, i);
+    FS_RECTF box{};
+    if (!p->FPDFText_GetLooseCharBox(tp, i, &box)) return std::max(1.0, size);
+    double fromBox = (box.top - box.bottom) / 1.12;   // ascent and descent: about 1.12 sizes in common fonts
+    return fromBox > 0 && (size < fromBox * 0.6 || size > fromBox * 1.6) ? fromBox : std::max(1.0, size);
+}
+
+/// True for the second copy of a character drawn twice in the same place (some web pages print every
+/// letter twice, or fake bold that way): it must not come out twice.
+bool Repeated(std::set<std::tuple<long, long, unsigned>>& seen, unsigned u, double l, double b)
+{
+    return !seen.insert({ std::lround(l * 4), std::lround(b * 4), u }).second;
+}
+
 std::vector<Line> PageLines(const Pdfium* p, FPDF_PAGE page)
 {
     std::vector<Line> lines;
     FPDF_TEXTPAGE tp = p->FPDFText_LoadPage(page);
     if (!tp) return lines;
     int n = p->FPDFText_CountChars(tp);
+    std::set<std::tuple<long, long, unsigned>> seen;
     Line cur;
     std::map<int, int> sizes;   // half points -> characters, for this line
     auto add = [&](const wstring& t, bool bold, bool italic) {
@@ -85,29 +128,25 @@ std::vector<Line> PageLines(const Pdfium* p, FPDF_PAGE page)
         cur = Line();
         sizes.clear();
     };
-    char font[128];
+    bool skipping = false;   // inside a repeated copy: its spaces go too
     for (int i = 0; i < n; i++) {
         unsigned u = p->FPDFText_GetUnicode(tp, i);
         if (u == L'\r' || u == L'\n') { if (u == L'\n' || !cur.spans.empty()) end(); continue; }
         if (u == 0xFFFE || u == 2) continue;   // soft hyphen markers PDFium adds
         bool bold = false, italic = false;
         double l, r, b, t;
-        if (p->FPDFText_GetCharBox(tp, i, &l, &r, &b, &t) && u != L' ') {
-            double sz = p->FPDFText_GetFontSize(tp, i);
+        bool boxed = p->FPDFText_GetCharBox(tp, i, &l, &r, &b, &t);
+        if (boxed && u != L' ') skipping = Repeated(seen, u, l, b);
+        if (skipping) continue;
+        if (boxed && u != L' ') {
+            double sz = ShownSize(p, tp, i);
             if (cur.chars == 0) { cur.top = t; cur.bottom = b; }
             cur.top = std::max(cur.top, t);
             cur.bottom = std::min(cur.bottom, b);
             cur.chars++;
             bool marker = u == 0x2022 || u == 0x25CF || u == 0x25E6 || u == 0x25AA;
             if (!marker) sizes[int(std::lround(sz * 2))]++;
-            int flags = 0;
-            font[0] = 0;
-            p->FPDFText_GetFontInfo(tp, i, font, sizeof font, &flags);
-            std::string f = font;
-            for (auto& c : f) c = char(tolower(uint8_t(c)));
-            bold = p->FPDFText_GetFontWeight(tp, i) >= 600 || f.find("bold") != std::string::npos || f.find("black") != std::string::npos ||
-                   f.find("heavy") != std::string::npos || (flags & (1 << 18)) != 0;
-            italic = f.find("italic") != std::string::npos || f.find("oblique") != std::string::npos || (flags & (1 << 6)) != 0;
+            CharStyle(p, tp, i, bold, italic);
             if (bold) cur.boldChars++;
         } else if (!cur.spans.empty()) {
             bold = cur.spans.back().bold;   // a space keeps the style around it
@@ -141,9 +180,55 @@ bool ListMarker(wstring& t, bool& ordered)
     return false;
 }
 
-/// Rendered pictures of a page's image objects (forms included), as PNG, or the original JPEG bytes.
+/// An image object's picture as PNG, or its original JPEG bytes; false when it has none.
+bool ImageBytes(const Pdfium* p, FPDF_PAGEOBJECT obj, Block& b)
+{
+    b.type = Block::Picture;
+    // A JPEG inside the PDF is taken as it is: no quality lost.
+    // (Behind other filters such as ASCII85 too: "decoded" data stops short of the image codec.)
+    char filter[32] = "";
+    int filters = p->FPDFImageObj_GetImageFilterCount(obj);
+    if (filters >= 1 && p->FPDFImageObj_GetImageFilter(obj, unsigned(filters - 1), filter, sizeof filter) && !strcmp(filter, "DCTDecode")) {
+        auto get = filters == 1 ? p->FPDFImageObj_GetImageDataRaw : p->FPDFImageObj_GetImageDataDecoded;
+        unsigned long n = get(obj, nullptr, 0);
+        if (n > 0) {
+            b.image.resize(n);
+            get(obj, b.image.data(), n);
+            if (b.image.size() > 3 && b.image[0] == 0xFF && b.image[1] == 0xD8) b.imageExt = L".jpg";
+            else b.image.clear();
+        }
+    }
+    FPDF_BITMAP bmp = p->FPDFImageObj_GetBitmap(obj);
+    if (!bmp) return false;
+    int w = p->FPDFBitmap_GetWidth(bmp), h = p->FPDFBitmap_GetHeight(bmp), stride = p->FPDFBitmap_GetStride(bmp), fmt = p->FPDFBitmap_GetFormat(bmp);
+    b.imgW = w;
+    b.imgH = h;
+    if (b.image.empty() && w > 1 && h > 1) {
+        Image img;
+        img.w = w; img.h = h;
+        img.px.resize(size_t(w) * h * 4);
+        const uint8_t* s = static_cast<const uint8_t*>(p->FPDFBitmap_GetBuffer(bmp));
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                uint8_t* d = &img.px[(size_t(y) * w + x) * 4];
+                const uint8_t* q = s + size_t(y) * stride;
+                if (fmt == FPDFBitmap_Gray) { d[0] = d[1] = d[2] = q[x]; d[3] = 255; }
+                else if (fmt == FPDFBitmap_BGR) { memcpy(d, q + x * 3, 3); d[3] = 255; }
+                else { memcpy(d, q + x * 4, 4); if (fmt == FPDFBitmap_BGRx) d[3] = 255; }
+            }
+        for (size_t i = 3; i < img.px.size(); i += 4) if (img.px[i] != 255) { img.alpha = true; break; }
+        wstring err;
+        if (EncodeImage(img, Kind::Png, 0, true, b.image, err)) b.imageExt = L".png";
+    }
+    p->FPDFBitmap_Destroy(bmp);
+    return !b.image.empty();
+}
+
+/// Rendered pictures of a page's image objects (forms included), each once: a page that draws a picture
+/// twice in the same place still has one picture.
 void PageImages(const Pdfium* p, FPDF_DOCUMENT doc, FPDF_PAGE page, std::vector<Block>& out)
 {
+    std::set<std::vector<uint8_t>> seen;
     std::function<void(FPDF_PAGEOBJECT)> visit = [&](FPDF_PAGEOBJECT obj) {
         int type = p->FPDFPageObj_GetType(obj);
         if (type == FPDF_PAGEOBJ_FORM) {
@@ -152,45 +237,7 @@ void PageImages(const Pdfium* p, FPDF_DOCUMENT doc, FPDF_PAGE page, std::vector<
         }
         if (type != FPDF_PAGEOBJ_IMAGE || out.size() >= 500) return;
         Block b;
-        b.type = Block::Picture;
-        // A JPEG inside the PDF is taken as it is: no quality lost.
-        // (Behind other filters such as ASCII85 too: "decoded" data stops short of the image codec.)
-        char filter[32] = "";
-        int filters = p->FPDFImageObj_GetImageFilterCount(obj);
-        if (filters >= 1 && p->FPDFImageObj_GetImageFilter(obj, unsigned(filters - 1), filter, sizeof filter) && !strcmp(filter, "DCTDecode")) {
-            auto get = filters == 1 ? p->FPDFImageObj_GetImageDataRaw : p->FPDFImageObj_GetImageDataDecoded;
-            unsigned long n = get(obj, nullptr, 0);
-            if (n > 0) {
-                b.image.resize(n);
-                get(obj, b.image.data(), n);
-                if (b.image.size() > 3 && b.image[0] == 0xFF && b.image[1] == 0xD8) b.imageExt = L".jpg";
-                else b.image.clear();
-            }
-        }
-        FPDF_BITMAP bmp = p->FPDFImageObj_GetBitmap(obj);
-        if (!bmp) return;
-        int w = p->FPDFBitmap_GetWidth(bmp), h = p->FPDFBitmap_GetHeight(bmp), stride = p->FPDFBitmap_GetStride(bmp), fmt = p->FPDFBitmap_GetFormat(bmp);
-        b.imgW = w;
-        b.imgH = h;
-        if (b.image.empty() && w > 1 && h > 1) {
-            Image img;
-            img.w = w; img.h = h;
-            img.px.resize(size_t(w) * h * 4);
-            const uint8_t* s = static_cast<const uint8_t*>(p->FPDFBitmap_GetBuffer(bmp));
-            for (int y = 0; y < h; y++)
-                for (int x = 0; x < w; x++) {
-                    uint8_t* d = &img.px[(size_t(y) * w + x) * 4];
-                    const uint8_t* q = s + size_t(y) * stride;
-                    if (fmt == FPDFBitmap_Gray) { d[0] = d[1] = d[2] = q[x]; d[3] = 255; }
-                    else if (fmt == FPDFBitmap_BGR) { memcpy(d, q + x * 3, 3); d[3] = 255; }
-                    else { memcpy(d, q + x * 4, 4); if (fmt == FPDFBitmap_BGRx) d[3] = 255; }
-                }
-            for (size_t i = 3; i < img.px.size(); i += 4) if (img.px[i] != 255) { img.alpha = true; break; }
-            wstring err;
-            if (EncodeImage(img, Kind::Png, 0, true, b.image, err)) b.imageExt = L".png";
-        }
-        p->FPDFBitmap_Destroy(bmp);
-        if (!b.image.empty()) out.push_back(std::move(b));
+        if (ImageBytes(p, obj, b) && seen.insert(b.image).second) out.push_back(std::move(b));
     };
     (void)doc;
     for (int i = 0, n = p->FPDFPage_CountObjects(page); i < n; i++) visit(p->FPDFPage_GetObject(page, i));
@@ -345,106 +392,239 @@ bool RunRemovePages(const Job& job, const Progress& p, Result& r)
     return WriteOutput(job, in, BaseName(in) + L" pages removed", L".pdf", bytes, p, r);
 }
 
-/// One character on the page, where it is (points, y up).
+/// One character on the page: where (points from the page's top left, y down) and how it looks.
 struct Glyph {
-    double l, r, b, t, size;
-    wstring c;
+    double l = 0, r = 0, t = 0, b = 0, size = 1;
+    wstring c, font;
+    bool bold = false, italic = false;
+    uint32_t color = 0;
 };
 
-/// A page as rows of cells, for a spreadsheet: characters are grouped into lines by height, lines into
-/// cells at wide gaps, and cells into columns where the table's lines all leave the same space empty.
-std::vector<std::vector<wstring>> PageTable(const Pdfium* p, FPDF_PAGE page)
+/// A straight line drawn on the page (y down), or a shaded box.
+struct Rule { double x0, y0, x1, y1; uint32_t color; };
+
+/// Positions within `tol` of the one before become one: the edges of a sheet's grid.
+std::vector<double> Edges(std::vector<double> v, double tol)
 {
-    std::vector<std::vector<wstring>> rows;
-    FPDF_TEXTPAGE tp = p->FPDFText_LoadPage(page);
-    if (!tp) return rows;
+    std::sort(v.begin(), v.end());
+    std::vector<double> out;
+    for (double x : v) if (out.empty() || x - out.back() > tol) out.push_back(x);
+    return out;
+}
+
+/// The grid slot x falls in: the last edge at or before x + tol.
+size_t Slot(const std::vector<double>& edges, double x, double tol)
+{
+    size_t i = size_t(std::upper_bound(edges.begin(), edges.end(), x + tol) - edges.begin());
+    return i ? i - 1 : 0;
+}
+
+/// The edge nearest to x.
+size_t Nearest(const std::vector<double>& edges, double x)
+{
+    size_t k = Slot(edges, x, 0);
+    return k + 1 < edges.size() && edges[k + 1] - x < x - edges[k] ? k + 1 : k;
+}
+
+/// A page as a sheet that looks like it (see PageSheet). The grid's edges are where the page's lines are
+/// and where its pieces of text start, so every piece lands in a cell of its own and the lines become
+/// the cells' borders. Numbers also end on an edge, so they can sit right-aligned where they were.
+PageSheet PageLayout(const Pdfium* p, FPDF_PAGE page)
+{
+    PageSheet sheet;
+    float L = 0, B = 0, R = 0, T = 0;
+    if (!p->FPDFPage_GetCropBox(page, &L, &B, &R, &T) && !p->FPDFPage_GetMediaBox(page, &L, &B, &R, &T)) { R = p->FPDF_GetPageWidthF(page); T = p->FPDF_GetPageHeightF(page); }
+    // shortcut: the page is read as stored, ignoring /Rotate; a turned page comes out on its side. Turn it when one turns up.
+    auto across = [&](double x) { return x - L; };
+    auto down = [&](double y) { return T - y; };
+
+    // Characters, each once.
     std::vector<Glyph> glyphs;
-    for (int i = 0, n = p->FPDFText_CountChars(tp); i < n; i++) {
-        unsigned u = p->FPDFText_GetUnicode(tp, i);
-        // The loose box spans the letter's whole width (its advance), so the gaps between boxes are real spaces.
-        FS_RECTF box{};
-        if (u <= L' ' || u == 0xFFFE || u == 0xA0 || !p->FPDFText_GetLooseCharBox(tp, i, &box)) continue;
-        double l = box.left, r = box.right, b = box.bottom, t = box.top;
-        wstring ch;
-        if (u >= 0x10000) { u -= 0x10000; ch += wchar_t(0xD800 + (u >> 10)); ch += wchar_t(0xDC00 + (u & 0x3FF)); }
-        else ch = wchar_t(u);
-        double size = std::max(1.0, p->FPDFText_GetFontSize(tp, i));
-        glyphs.push_back({ l, r, b, t, size, ch });
+    if (FPDF_TEXTPAGE tp = p->FPDFText_LoadPage(page)) {
+        std::set<std::tuple<long, long, unsigned>> seen;
+        for (int i = 0, n = p->FPDFText_CountChars(tp); i < n; i++) {
+            unsigned u = p->FPDFText_GetUnicode(tp, i);
+            // The loose box spans the letter's whole width (its advance), so the gaps between boxes are real spaces.
+            FS_RECTF box{};
+            if (u <= L' ' || u == 0xFFFE || u == 0xA0 || !p->FPDFText_GetLooseCharBox(tp, i, &box)) continue;
+            if (Repeated(seen, u, box.left, box.bottom)) continue;
+            Glyph g;
+            g.l = across(box.left); g.r = across(box.right); g.t = down(box.top); g.b = down(box.bottom);
+            g.size = ShownSize(p, tp, i);
+            if (u >= 0x10000) { u -= 0x10000; g.c += wchar_t(0xD800 + (u >> 10)); g.c += wchar_t(0xDC00 + (u & 0x3FF)); }
+            else g.c = wchar_t(u);
+            CharStyle(p, tp, i, g.bold, g.italic, &g.font);
+            unsigned cr = 0, cg = 0, cb = 0, ca = 0;
+            if (p->FPDFText_GetFillColor(tp, i, &cr, &cg, &cb, &ca)) g.color = cr << 16 | cg << 8 | cb;
+            glyphs.push_back(std::move(g));
+        }
+        p->FPDFText_ClosePage(tp);
     }
-    p->FPDFText_ClosePage(tp);
-    if (glyphs.empty()) return rows;
 
-    // Lines: top to bottom, a character joins the line whose middle is within half its size.
-    std::sort(glyphs.begin(), glyphs.end(), [](const Glyph& a, const Glyph& b) { return (a.b + a.t) > (b.b + b.t); });
+    // Lines drawn (thin filled bars, or the sides of outlined boxes), shaded boxes and pictures, forms included.
+    std::vector<Rule> hs, vs, boxes;
+    struct Pic { double x0, y0, x1, y1; Block b; };
+    std::vector<Pic> pics;
+    std::function<void(FPDF_PAGEOBJECT, const FS_MATRIX&)> visit = [&](FPDF_PAGEOBJECT obj, const FS_MATRIX& m) {
+        int type = p->FPDFPageObj_GetType(obj);
+        if (type == FPDF_PAGEOBJ_FORM) {
+            // What a form holds is in its own space: its matrix, then the one around it.
+            FS_MATRIX f{};
+            if (!p->FPDFPageObj_GetMatrix(obj, &f)) return;
+            FS_MATRIX c{ f.a * m.a + f.b * m.c, f.a * m.b + f.b * m.d, f.c * m.a + f.d * m.c, f.c * m.b + f.d * m.d,
+                         f.e * m.a + f.f * m.c + m.e, f.e * m.b + f.f * m.d + m.f };
+            for (int i = 0, n = p->FPDFFormObj_CountObjects(obj); i < n; i++) visit(p->FPDFFormObj_GetObject(obj, unsigned(i)), c);
+            return;
+        }
+        if (type != FPDF_PAGEOBJ_IMAGE && type != FPDF_PAGEOBJ_PATH) return;
+        float bl = 0, bb = 0, br = 0, bt = 0;
+        if (!p->FPDFPageObj_GetBounds(obj, &bl, &bb, &br, &bt)) return;
+        double x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        for (auto [x, y] : { std::pair<double, double>{ bl, bb }, { br, bb }, { bl, bt }, { br, bt } }) {
+            double X = across(m.a * x + m.c * y + m.e), Y = down(m.b * x + m.d * y + m.f);
+            x0 = std::min(x0, X); x1 = std::max(x1, X); y0 = std::min(y0, Y); y1 = std::max(y1, Y);
+        }
+        if (type == FPDF_PAGEOBJ_IMAGE) {
+            Pic pic{ x0, y0, x1, y1, {} };
+            if (pics.size() < 500 && ImageBytes(p, obj, pic.b)) pics.push_back(std::move(pic));
+            return;
+        }
+        int fillMode = 0;
+        FPDF_BOOL stroke = 0;
+        p->FPDFPath_GetDrawMode(obj, &fillMode, &stroke);
+        unsigned r = 0, g = 0, b = 0, a = 0;
+        bool painted = fillMode ? p->FPDFPageObj_GetFillColor(obj, &r, &g, &b, &a) : stroke && p->FPDFPageObj_GetStrokeColor(obj, &r, &g, &b, &a);
+        if (!painted || a == 0 || (r > 245 && g > 245 && b > 245)) return;   // white on white paper shows nothing
+        uint32_t color = r << 16 | g << 8 | b;
+        double w = x1 - x0, h = y1 - y0;
+        if (h <= 2 && w >= 3) hs.push_back({ x0, (y0 + y1) / 2, x1, (y0 + y1) / 2, color });
+        else if (w <= 2 && h >= 3) vs.push_back({ (x0 + x1) / 2, y0, (x0 + x1) / 2, y1, color });
+        else if (w > 2 && h > 2 && p->FPDFPath_CountSegments(obj) <= 5) {
+            // A rectangle: shaded, it fills cells; outlined, its sides are lines.
+            if (fillMode) boxes.push_back({ x0, y0, x1, y1, color });
+            else {
+                hs.push_back({ x0, y0, x1, y0, color }); hs.push_back({ x0, y1, x1, y1, color });
+                vs.push_back({ x0, y0, x0, y1, color }); vs.push_back({ x1, y0, x1, y1, color });
+            }
+        }
+    };
+    const FS_MATRIX identity{ 1, 0, 0, 1, 0, 0 };
+    for (int i = 0, n = p->FPDFPage_CountObjects(page); i < n; i++) visit(p->FPDFPage_GetObject(page, i), identity);
+
+    // Lines of text: top to bottom, a character joins the line whose middle is within half its size.
+    std::sort(glyphs.begin(), glyphs.end(), [](const Glyph& a, const Glyph& b) { return a.t + a.b < b.t + b.b; });
     std::vector<std::vector<Glyph>> lines;
-    double mid = 1e9;
+    double mid = -1e9;
     for (auto& g : glyphs) {
-        double m = (g.b + g.t) / 2;
+        double m = (g.t + g.b) / 2;
         if (lines.empty() || std::fabs(m - mid) > g.size * 0.5) { lines.emplace_back(); mid = m; }
-        lines.back().push_back(g);
+        lines.back().push_back(std::move(g));
     }
 
-    // Cells: a gap wider than about a letter starts a new cell; a smaller one is a space.
-    struct CellBox { double l, r; wstring text; };
-    std::vector<std::vector<CellBox>> cells;
+    // Pieces of text: a gap wider than about a letter, or a line drawn between, starts a new piece.
+    struct Run { double l, r, t, b; wstring text; std::vector<PageSheet::Piece> pieces; };
+    std::vector<Run> runs;
+    auto ruleBetween = [&](double a, double c, double t, double b) {
+        for (auto& v : vs) if (v.x0 > a && v.x0 < c && v.y0 < b && v.y1 > t) return true;
+        return false;
+    };
     for (auto& line : lines) {
         std::sort(line.begin(), line.end(), [](const Glyph& a, const Glyph& b) { return a.l < b.l; });
-        cells.emplace_back();
         for (size_t i = 0; i < line.size(); i++) {
             const Glyph& g = line[i];
             double gap = i ? g.l - line[i - 1].r : 1e9;
-            if (gap > g.size * 0.9) cells.back().push_back({ g.l, g.r, g.c });
-            else {
-                if (gap > g.size * 0.12) cells.back().back().text += L' ';
-                cells.back().back().text += g.c;
-                cells.back().back().r = std::max(cells.back().back().r, g.r);
-            }
+            if (gap > g.size * 0.9 || ruleBetween(line[i - 1].r - 0.5, g.l + 0.5, g.t, g.b)) runs.push_back({ g.l, g.r, g.t, g.b, L"", {} });
+            Run& run = runs.back();
+            wstring add = (!run.text.empty() && gap > g.size * 0.12 ? L" " : L"") + g.c;
+            run.text += add;
+            run.r = std::max(run.r, g.r); run.t = std::min(run.t, g.t); run.b = std::max(run.b, g.b);
+            auto& ps = run.pieces;
+            if (!ps.empty() && ps.back().font == g.font && ps.back().bold == g.bold && ps.back().italic == g.italic && ps.back().color == g.color &&
+                std::fabs(ps.back().size - g.size) < 0.3) ps.back().text += add;
+            else ps.push_back({ add, g.font, g.size, g.bold, g.italic, g.color });
         }
+    }
+    auto numeric = [](const wstring& s) {
+        return s.find_first_of(L"0123456789") != wstring::npos && s.find_first_not_of(L"0123456789.,()-%") == wstring::npos;
+    };
+
+    // The grid: every line drawn, every piece of text's top and bottom. A piece that crosses a row edge (a
+    // ":" centred beside a label and its translation, a big word beside small ones) spans those rows.
+    const double tolX = 2, tolY = 1.5;
+    double pageW = std::max(1.0, double(R - L)), pageH = std::max(1.0, double(T - B));
+    std::vector<double> xs{ 0 }, ys{ 0 };
+    for (auto& h : hs) { xs.push_back(h.x0); xs.push_back(h.x1); ys.push_back(h.y0); }
+    for (auto& v : vs) { xs.push_back(v.x0); ys.push_back(v.y0); ys.push_back(v.y1); }
+    for (auto& b : boxes) { xs.push_back(b.x0); xs.push_back(b.x1); ys.push_back(b.y0); ys.push_back(b.y1); }
+    for (auto& pic : pics) { xs.push_back(pic.x0); ys.push_back(pic.y0); }
+    for (auto& run : runs) {
+        xs.push_back(run.l);
+        if (numeric(run.text)) xs.push_back(run.r);
+        ys.push_back(run.t); ys.push_back(run.b);
+    }
+    xs = Edges(xs, tolX);
+    ys = Edges(ys, tolY);
+    for (size_t i = 0; i < xs.size(); i++) sheet.colW.push_back(std::max(0.5, (i + 1 < xs.size() ? xs[i + 1] : std::max(pageW, xs[i] + 8)) - xs[i]));
+    for (size_t i = 0; i < ys.size(); i++) sheet.rowH.push_back(std::max(0.75, (i + 1 < ys.size() ? ys[i + 1] : std::max(pageH, ys[i] + 8)) - ys[i]));
+
+    // Text into cells; two pieces that fall in one cell share it.
+    std::map<std::pair<size_t, size_t>, size_t> at;
+    for (auto& run : runs) {
+        size_t row = Slot(ys, run.t, tolY), col = Slot(xs, run.l, tolX);
+        auto [it, fresh] = at.insert({ { row, col }, sheet.texts.size() });
+        if (!fresh) {
+            auto& pieces = sheet.texts[it->second].pieces;
+            run.pieces.front().text.insert(0, L" ");
+            pieces.insert(pieces.end(), run.pieces.begin(), run.pieces.end());
+            continue;
+        }
+        PageSheet::Text t;
+        t.row = row;
+        t.col = col;
+        // A number sits right-aligned when it ends near a line on its right, or isn't in a box at all;
+        // one that starts against the line on its left (a year in its box) sits left.
+        auto lineNear = [&](double x, double within) {
+            for (auto& v : vs) if (std::fabs(v.x0 - x) < within && v.y0 < run.b && v.y1 > run.t) return true;
+            return false;
+        };
+        t.right = numeric(run.text) && (lineNear(run.r, 8) || !lineNear(run.l, 4));
+        t.rowEnd = std::max(row, Slot(ys, run.b - tolY - 0.01, 0));
+        // Text that spans rows can't spill sideways in Excel: its cell reaches as far as the text does.
+        t.colEnd = t.right ? std::max(col, Slot(xs, run.r - tolX - 0.01, 0)) : t.rowEnd > row ? std::max(col, Slot(xs, run.r, 0)) : col;
+        t.pieces = std::move(run.pieces);
+        sheet.texts.push_back(std::move(t));
     }
 
-    // A bullet on its own is part of the text after it, not a column.
-    for (auto& row : cells)
-        for (size_t i = 0; i + 1 < row.size(); i++)
-            if (row[i].text.size() == 1 && wcschr(L"•●◦▪–-*", row[i].text[0])) {
-                row[i + 1].text = row[i].text + L" " + row[i + 1].text;
-                row[i + 1].l = row[i].l;
-                row.erase(row.begin() + long(i));
-            }
+    // Lines as borders, on the cells beside them; of two lines drawn together (a bevel), the darker.
+    auto mark = [&](size_t row, size_t col, uint8_t side, uint32_t color) {
+        auto& e = sheet.borders[{ row, col }];
+        auto dark = [](uint32_t c) { return (c >> 16 & 255) + (c >> 8 & 255) + (c & 255); };
+        if (!(e.sides & side) || dark(color) < dark(e.color)) e.color = color;
+        e.sides |= side;
+    };
+    for (auto& h : hs) {
+        size_t k = Nearest(ys, h.y0);
+        bool above = ys[k] < h.y0 - tolY;   // the nearest edge is above the line: it is the bottom of that row
+        for (size_t c = Slot(xs, h.x0, tolX); c < xs.size() && xs[c] < h.x1 - tolX; c++) mark(k, c, above ? 8 : 4, h.color);
+    }
+    for (auto& v : vs) {
+        size_t j = Nearest(xs, v.x0);
+        bool left = xs[j] < v.x0 - tolX;
+        for (size_t r = Slot(ys, v.y0, tolY); r < ys.size() && ys[r] < v.y1 - tolY; r++) mark(r, j, left ? 2 : 1, v.color);
+    }
+    for (auto& b : boxes)
+        for (size_t r = Slot(ys, b.y0, tolY); r < ys.size() && ys[r] < b.y1 - tolY; r++)
+            for (size_t c = Slot(xs, b.x0, tolX); c < xs.size() && xs[c] < b.x1 - tolX; c++) sheet.fills[{ r, c }] = b.color;
 
-    // Columns: where no line of the table (a line with two or more cells) has ink, there's a border.
-    double minX = 1e9, maxX = -1e9;
-    int tableLines = 0;
-    for (auto& row : cells) if (row.size() >= 2) { tableLines++; for (auto& c : row) { minX = std::min(minX, c.l); maxX = std::max(maxX, c.r); } }
-    std::vector<double> borders;
-    if (tableLines > 0) {
-        const double step = 0.5;
-        size_t bins = size_t((maxX - minX) / step) + 2;
-        std::vector<int> cover(bins, 0);
-        for (auto& row : cells)
-            if (row.size() >= 2)
-                for (auto& c : row)
-                    for (size_t k = size_t((c.l - minX) / step); k <= size_t((c.r - minX) / step) && k < bins; k++) cover[k]++;
-        int allowed = tableLines / 20;   // a heading that spans columns now and then doesn't close a gap
-        for (size_t k = 0; k < bins;) {
-            if (cover[k] > allowed) { k++; continue; }
-            size_t e = k;
-            while (e < bins && cover[e] <= allowed) e++;
-            if (k > 0 && e < bins) borders.push_back(minX + (k + e) / 2.0 * step);
-            k = e;
-        }
+    // Pictures where they were, each once.
+    std::set<std::tuple<long, long, std::vector<uint8_t>>> seenPics;
+    for (auto& pic : pics) {
+        if (!seenPics.insert({ std::lround(pic.x0), std::lround(pic.y0), pic.b.image }).second) continue;
+        size_t c = Slot(xs, pic.x0, 0), r = Slot(ys, pic.y0, 0);
+        sheet.pictures.push_back({ r, c, std::max(0.0, pic.x0 - xs[c]), std::max(0.0, pic.y0 - ys[r]), pic.x1 - pic.x0, pic.y1 - pic.y0,
+                                   std::move(pic.b.image), pic.b.imageExt });
     }
-    auto columnOf = [&](double x) { return size_t(std::upper_bound(borders.begin(), borders.end(), x) - borders.begin()); };
-    for (auto& row : cells) {
-        std::vector<wstring> out;
-        for (auto& c : row) {
-            // A lone line wider than a column (a title, a paragraph) starts at the left.
-            size_t col = row.size() == 1 && columnOf(c.l) != columnOf(c.r) ? 0 : columnOf((c.l + c.r) / 2);
-            if (out.size() <= col) out.resize(col + 1);
-            out[col] += (out[col].empty() ? L"" : L" ") + c.text;
-        }
-        rows.push_back(std::move(out));
-    }
-    return rows;
+    return sheet;
 }
 
 /// A page's visible box and turn: converts between the page as shown (u right, v down, 0..1, what
@@ -863,20 +1043,20 @@ bool RunPdfTo(const Job& job, const wstring& target, const Progress& p, Result& 
         return f.End(r);
     }
     if (target == L"xlsx") {
-        // Tables: every page's rows, one after another, a blank row between pages.
-        std::vector<std::vector<wstring>> rows;
+        // Every page as a sheet laid out like it.
+        std::vector<PageSheet> sheets;
+        bool text = false;
         for (int i = 0; i < pages; i++) {
             FPDF_PAGE page = pdf.api()->FPDF_LoadPage(pdf.get(), i);
             if (!page) continue;
-            auto t = PageTable(pdf.api(), page);
+            sheets.push_back(PageLayout(pdf.api(), page));
             pdf.api()->FPDF_ClosePage(page);
-            if (!rows.empty() && !t.empty()) rows.emplace_back();
-            rows.insert(rows.end(), t.begin(), t.end());
+            text = text || !sheets.back().texts.empty();
             p.Set(0.9 * (i + 1) / pages);
         }
-        if (rows.empty()) { r.error = L"This PDF has no text to put in a spreadsheet (it may be scanned pages)."; return false; }
+        if (!text) { r.error = L"This PDF has no text to put in a spreadsheet (it may be scanned pages)."; return false; }
         std::vector<uint8_t> out;
-        if (!WriteRowsXlsx(rows, out)) { r.error = L"Could not write the workbook."; return false; }
+        if (!WritePageSheets(sheets, out)) { r.error = L"Could not write the workbook."; return false; }
         return WriteOutput(job, in, base, L".xlsx", out, p, r);
     }
     if (target == L"pptx") {

@@ -3,6 +3,8 @@
 #pragma once
 #include "../registry.h"
 
+#include <map>
+
 namespace rd {
 
 // image.cpp
@@ -22,7 +24,21 @@ bool WavToMp3(const wstring& wav, std::vector<uint8_t>& mp3, const Progress& p, 
 // speech.cpp
 bool SpeakToWav(const wstring& text, const wstring& wavPath, const Progress& p, wstring& err);   // Windows' own voice, offline
 struct Image;
-bool WriteRowsXlsx(const std::vector<std::vector<wstring>>& rows, std::vector<uint8_t>& out);   // sheet.cpp: text rows, numbers recognised
+/// A PDF page laid out as a sheet, so the workbook looks like the page: a grid whose columns and rows
+/// are the page's own widths and heights (points), text in the cell where it starts, the page's lines
+/// as cell borders, its shaded boxes as fills, and its pictures where they were. pdfconv.cpp fills it.
+struct PageSheet {
+    struct Piece { wstring text, font; double size = 11; bool bold = false, italic = false; uint32_t color = 0; };   // color 0xRRGGBB
+    struct Text { size_t row = 0, col = 0, rowEnd = 0, colEnd = 0; bool right = false; std::vector<Piece> pieces; };   // right: right-aligned, ends at colEnd
+    struct Edge { uint8_t sides = 0; uint32_t color = 0; };   // sides: 1 left, 2 right, 4 top, 8 bottom
+    struct Picture { size_t row = 0, col = 0; double dx = 0, dy = 0, w = 0, h = 0; std::vector<uint8_t> bytes; wstring ext; };   // points
+    std::vector<double> colW, rowH;
+    std::vector<Text> texts;
+    std::map<std::pair<size_t, size_t>, Edge> borders;     // (row, col) ->
+    std::map<std::pair<size_t, size_t>, uint32_t> fills;   // (row, col) -> 0xRRGGBB
+    std::vector<Picture> pictures;
+};
+bool WritePageSheets(const std::vector<PageSheet>& pages, std::vector<uint8_t>& out);   // sheet.cpp: one sheet per page
 bool PdfPreview(const wstring& path, int maxSide, Image& img, wstring& err, int page = 0, int* pages = nullptr);
 
 // archive.cpp

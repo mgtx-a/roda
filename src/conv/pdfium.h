@@ -34,7 +34,9 @@ namespace rd {
     X(FPDFAnnot_GetFormFieldType) X(FPDFAnnot_GetFormFieldName) X(FPDFAnnot_GetFormFieldAlternateName) X(FPDFAnnot_GetFormFieldValue) X(FPDFAnnot_GetFormFieldExportValue) \
     X(FPDFAnnot_GetFormFieldFlags) X(FPDFAnnot_GetOptionCount) X(FPDFAnnot_GetOptionLabel) X(FPDFAnnot_IsChecked) \
     X(FORM_SetFocusedAnnot) X(FORM_SelectAllText) X(FORM_ReplaceSelection) X(FORM_ForceToKillFocus) X(FORM_SetIndexSelected) \
-    X(FORM_OnLButtonDown) X(FORM_OnLButtonUp) X(FPDF_FFLDraw) X(FPDFText_LoadStandardFont) X(FPDFPageObj_CreateTextObj) X(FPDFText_SetText) X(FPDFFont_Close)
+    X(FORM_OnLButtonDown) X(FORM_OnLButtonUp) X(FPDF_FFLDraw) X(FPDFText_LoadStandardFont) X(FPDFPageObj_CreateTextObj) X(FPDFText_SetText) X(FPDFFont_Close) \
+    X(FPDFText_GetFillColor) X(FPDFPageObj_GetBounds) X(FPDFPageObj_GetMatrix) X(FPDFPageObj_GetFillColor) X(FPDFPageObj_GetStrokeColor) \
+    X(FPDFPath_GetDrawMode) X(FPDFPath_CountSegments)
 
 struct Pdfium {
 #define RD_PDFIUM_MEMBER(name) decltype(&::name) name = nullptr;
