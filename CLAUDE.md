@@ -7,7 +7,7 @@
 - Style (from Ampaian): short functions, comments that say *why*, plain-English log lines, no exceptions,
   `Com<T>` for COM.
 - Commits: one short plain sentence. No `Co-Authored-By`, `Claude-Session` or "Generated with" lines.
-- Ask before: choosing a licence, adding a library not in `PLAN.md`, pushing, tagging, releasing.
+- Licence: MIT (LICENSE). Ask before: adding a library not in `PLAN.md`, tagging, releasing.
 - Keep `README.md` (especially Privacy) and `THIRD_PARTY.md` accurate as features land.
 - UI behaviour is only "working" once the user has confirmed it on screen.
 - Tests: `bash tests/run_tests.sh <exe>` (CLI conversions over `tests/corpus`, regenerate with

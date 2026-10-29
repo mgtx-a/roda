@@ -8,7 +8,7 @@ converted or acted on, locally.
 > archives and file actions work. Audio and video come in Phase 4.
 
 ## Download
-Not released yet. Two builds, for x64 and ARM64, neither needing an installer, admin rights or a runtime:
+Not released yet (builds from every push are under the repository's Actions tab). Two builds, for x64 and ARM64, neither needing an installer, admin rights or a runtime:
 
 - **Full** (a zip): `Roda.exe` plus `engines\pdfium.dll` for PDFs. Unzip it anywhere, including a USB
   stick; delete the folder to remove it.
@@ -142,5 +142,5 @@ checks the results decode again with the right size; broken files must fail clea
 `tests/dragtest.cpp` plays real drags with injected input (it moves the pointer); results of the Phase 1
 run are in [tests/phase1-results.md](tests/phase1-results.md).
 
-Licences of third-party code: [THIRD_PARTY.md](THIRD_PARTY.md). Portions of this software are copyright
+Roda is free software under the [MIT licence](LICENSE). Licences of third-party code: [THIRD_PARTY.md](THIRD_PARTY.md). Portions of this software are copyright
 © The FreeType Project (www.freetype.org). All rights reserved.
