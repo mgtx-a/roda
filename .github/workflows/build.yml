@@ -16,7 +16,37 @@ permissions:
   attestations: write
 
 jobs:
+  # The trimmed FFmpeg (tools/ffmpeg/build.sh), cross-compiled on Linux. Rebuilt only when the
+  # script changes; otherwise it comes from the cache.
+  ffmpeg:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: cache
+        uses: actions/cache@v5
+        with:
+          path: ffmpeg-out
+          key: ffmpeg-${{ matrix.arch }}-${{ hashFiles('tools/ffmpeg/build.sh') }}
+
+      - name: Build FFmpeg
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nasm meson ninja-build cmake pkg-config autotools-dev >/dev/null
+          WORK=$RUNNER_TEMP/ffwork bash tools/ffmpeg/build.sh ${{ matrix.arch }} ffmpeg-out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-${{ matrix.arch }}
+          path: ffmpeg-out
+          retention-days: 90
+
   build:
+    needs: ffmpeg
     runs-on: windows-latest
     defaults:
       run:
@@ -27,6 +57,11 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: 0.17.0
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: ffmpeg-*
+          path: third_party/ffmpeg-bin
 
       - name: Build
         env:
