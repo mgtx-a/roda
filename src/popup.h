@@ -1,5 +1,5 @@
 // The small options popup some tools need before they run: Compress (a quality slider), Size
-// (width and height) and Crop (a rectangle on a preview). Mouse first; keys work once it has focus:
+// (width and height), Trim (start and end), Remove pages (which pages) and Crop (a rectangle on a preview). Mouse first; keys work once it has focus:
 // arrows, digits, Tab, Enter applies, Esc cancels.
 #pragma once
 #include "anim.h"

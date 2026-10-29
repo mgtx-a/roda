@@ -125,6 +125,15 @@ if [ -f "$(dirname "$EXE")/engines/pdfium.dll" ]; then
   info "$P/report pages/report page 2.pdf"; [ "$(field pages)" = "1" ] && ok || bad "split page: $INFO"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P")\\" --op pdf.images
   [ $RC -eq 0 ] && [ -f "$P/report images/report image 1.jpg" ] && ok || bad "extract images: $OUT $(ls "$P/report images" 2>&1)"
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/cut.pdf")" --op pdf.remove --option "pages=2"
+  info "$P/cut.pdf"; [ "$(field pages)" = "2" ] && ok || bad "remove page 2: $INFO"
+  convert "$P/cut.pdf" "$P/cut.txt" && { grep -q "Page two text." "$P/cut.txt" && bad "page 2 still there" || ok; }
+  roda --convert "$(win "$CORPUS/long.pdf")" "$(win "$P/cut2.pdf")" --op pdf.remove --option "pages=1, 10-299"
+  info "$P/cut2.pdf"; [ "$(field pages)" = "9" ] && ok || bad "remove 1, 10-299 of 300: $INFO"
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/none.pdf")" --op pdf.remove --option "pages=1-3"
+  [ $RC -eq 1 ] && grep -q "every page" <<<"$OUT" && [ ! -f "$P/none.pdf" ] && ok || bad "removing every page must fail: $OUT"
+  roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/none.pdf")" --op pdf.remove --option "pages=4"
+  [ $RC -eq 1 ] && grep -q "has 3 pages" <<<"$OUT" && ok || bad "page 4 of 3 must fail: $OUT"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$P/rot.pdf")" --op pdf.rotate
   info "$P/rot.pdf"; [ "$(field pages)" = "3" ] && ok || bad "rotate: $INFO"
   roda --convert "$(win "$CORPUS/report.pdf")" "$(win "$CORPUS/photo.jpg")" "$(win "$CORPUS/long.pdf")" "$(win "$P/merged.pdf")"

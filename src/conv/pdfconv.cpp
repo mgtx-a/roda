@@ -291,6 +291,60 @@ bool RunRotate(const Job& job, const Progress& p, Result& r)
     return WriteOutput(job, job.inputs[0], BaseName(job.inputs[0]) + L" rotated", L".pdf", out, p, r);
 }
 
+/// "2, 5-7" -> the page numbers (1-based) in it. False, with a message, when it doesn't make sense.
+bool ParsePages(const wstring& spec, int pages, std::vector<bool>& marked, wstring& err)
+{
+    marked.assign(size_t(pages) + 1, false);
+    size_t i = 0;
+    auto number = [&](int& v) {
+        while (i < spec.size() && spec[i] == L' ') i++;
+        if (i >= spec.size() || !iswdigit(spec[i])) return false;
+        v = 0;
+        while (i < spec.size() && iswdigit(spec[i])) v = std::min(v * 10 + (spec[i++] - L'0'), 1000000);
+        while (i < spec.size() && spec[i] == L' ') i++;
+        return true;
+    };
+    while (i < spec.size()) {
+        int a = 0, b = 0;
+        if (!number(a)) { err = L"Write the pages like 2 or 5-7, with commas between."; return false; }
+        b = a;
+        if (i < spec.size() && spec[i] == L'-') { i++; if (!number(b)) { err = L"A range needs two page numbers, like 5-7."; return false; } }
+        if (a > b) std::swap(a, b);
+        if (a < 1 || b > pages) { err = L"This PDF has " + std::to_wstring(pages) + (pages == 1 ? L" page." : L" pages."); return false; }
+        for (int k = a; k <= b; k++) marked[size_t(k)] = true;
+        if (i < spec.size() && spec[i] == L',') i++;
+        else if (i < spec.size()) { err = L"Write the pages like 2 or 5-7, with commas between."; return false; }
+    }
+    return true;
+}
+
+bool RunRemovePages(const Job& job, const Progress& p, Result& r)
+{
+    const wstring& in = job.inputs[0];
+    PdfDoc pdf;
+    if (!pdf.Open(in, r.error)) return false;
+    const Pdfium* api = pdf.api();
+    std::vector<bool> drop;
+    if (!ParsePages(job.opts[L"pages"].Str(), pdf.pages(), drop, r.error)) return false;
+    // The pages that stay, as a range list ("1,3-4,8"), copied into a new PDF.
+    std::string keep;
+    for (int k = 1; k <= pdf.pages(); k++) {
+        if (drop[size_t(k)]) continue;
+        int end = k;
+        while (end < pdf.pages() && !drop[size_t(end) + 1]) end++;
+        keep += (keep.empty() ? "" : ",") + std::to_string(k) + (end > k ? "-" + std::to_string(end) : "");
+        k = end;
+    }
+    if (keep.empty()) { r.error = L"That would remove every page."; return false; }
+    FPDF_DOCUMENT out = api->FPDF_CreateNewDocument();
+    std::vector<uint8_t> bytes;
+    bool ok = out && api->FPDF_ImportPages(out, pdf.get(), keep.c_str(), 0) && SavePdf(api, out, bytes);
+    if (out) api->FPDF_CloseDocument(out);
+    if (!ok) { r.error = L"Could not save the PDF without those pages."; return false; }
+    r.before = FileSize(in);
+    return WriteOutput(job, in, BaseName(in) + L" pages removed", L".pdf", bytes, p, r);
+}
+
 bool RunSplit(const Job& job, const Progress& p, Result& r)
 {
     const wstring& in = job.inputs[0];
@@ -427,6 +481,7 @@ bool RunPdfTool(const Job& job, const Progress& p, Result& r)
     if (job.op == L"pdf.split") return RunSplit(job, p, r);
     if (job.op == L"pdf.images") return RunImages(job, p, r);
     if (job.op == L"pdf.rotate") return RunRotate(job, p, r);
+    if (job.op == L"pdf.remove") return RunRemovePages(job, p, r);
     r.error = L"Unknown PDF tool.";
     return false;
 }

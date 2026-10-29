@@ -312,6 +312,7 @@ struct App {
         wstring title = paths.size() == 1 ? o.label + L" " + FileName(paths[0]) : o.label + L" " + std::to_wstring(paths.size()) + L" pictures";
         if (c->popup == Popup::Quality) popup.Show(Popup::Quality, L"Compress", at, settings.compressQuality);
         else if (c->popup == Popup::Size) popup.Show(Popup::Size, L"Resize to", at, 0);
+        else if (c->popup == Popup::Pages) popup.Show(Popup::Pages, L"Remove pages from " + FileName(paths[0]), at, 0);
         else if (c->popup == Popup::Trim) popup.Show(Popup::Trim, L"Trim " + (paths.size() == 1 ? FileName(paths[0]) : L""), at, 0);
         else if (c->popup == Popup::Crop) {
             Preview(paths[0], 1200, [this, at, title](const wstring& png, int w, int h) { popup.Show(Popup::Crop, title, at, 0, png, w, h); });

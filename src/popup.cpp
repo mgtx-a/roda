@@ -112,6 +112,7 @@ OptionsPopup::Part OptionsPopup::HitTest(double x, double y, int* aspect) const
     if (In(x, y, L + w_ - 20 - kBtnW, by, kBtnW, kBtnH)) return Part::Apply;
     if (In(x, y, L + w_ - 20 - 2 * kBtnW - 8, by, kBtnW, kBtnH)) return Part::Cancel;
     if (kind_ == Popup::Quality && In(x, y, L + 12, T + 60, w_ - 24, 30)) return Part::Slider;
+    if (kind_ == Popup::Pages && In(x, y, L + 20, T + 64, w_ - 40, 34)) return Part::Width;
     if (kind_ == Popup::Size || kind_ == Popup::Trim) {
         if (In(x, y, L + 20, T + 64, 124, 34)) return Part::Width;
         if (In(x, y, L + w_ - 20 - 124, T + 64, 124, 34)) return Part::Height;
@@ -216,6 +217,10 @@ void OptionsPopup::Apply()
         if (b > 0 && b <= a) { MessageBeep(MB_OK); return; }
         opts.Set(L"start", a);
         if (b > 0) opts.Set(L"end", b);
+    } else if (kind_ == Popup::Pages) {
+        // Checked against the page count by the worker, which has the PDF open.
+        if (width_.find_first_of(L"0123456789") == wstring::npos) { MessageBeep(MB_OK); return; }
+        opts.Set(L"pages", width_);
     } else if (kind_ == Popup::Crop) {
         int x = int(std::lround(cx_ * origW_)), y = int(std::lround(cy_ * origH_));
         int w = std::max(1, int(std::lround(cw_ * origW_))), h = std::max(1, int(std::lround(ch_ * origH_)));
@@ -294,7 +299,7 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 quality_ = std::clamp(quality_ + (w == VK_RIGHT ? step : -step), 1, 100);
             }
             if ((kind_ == Popup::Size || kind_ == Popup::Trim) && w == VK_TAB) field_ ^= 1;
-            if ((kind_ == Popup::Size || kind_ == Popup::Trim) && w == VK_BACK) { wstring& f = field_ ? height_ : width_; if (!f.empty()) f.pop_back(); }
+            if ((kind_ == Popup::Size || kind_ == Popup::Trim || kind_ == Popup::Pages) && w == VK_BACK) { wstring& f = field_ ? height_ : width_; if (!f.empty()) f.pop_back(); }
             if (kind_ == Popup::Crop && w >= '1' && w <= '4') SetAspect(int(w - '1'));
             dirty_ = true;
             RequestFrame();
@@ -304,6 +309,11 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             if (kind_ == Popup::Size && w >= L'0' && w <= L'9') {
                 wstring& f = field_ ? height_ : width_;
                 if (f.size() < 5 && !(f.empty() && w == L'0')) f += wchar_t(w);
+                dirty_ = true;
+                RequestFrame();
+            }
+            if (kind_ == Popup::Pages && ((w >= L'0' && w <= L'9') || w == L',' || w == L'-' || w == L' ')) {
+                if (width_.size() < 40) width_ += wchar_t(w);
                 dirty_ = true;
                 RequestFrame();
             }
@@ -345,7 +355,7 @@ void OptionsPopup::Draw()
         surf_.DrawText(label, 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(x + (kBtnW - tw) / 2, y + 6.5, tw + 4, 18), primary ? th.accentText : th.text);
     };
     float by = T + H - 16 - float(kBtnH);
-    const wchar_t* verb = kind_ == Popup::Quality ? L"Compress" : kind_ == Popup::Size ? L"Resize" : kind_ == Popup::Trim ? L"Trim" : L"Crop";
+    const wchar_t* verb = kind_ == Popup::Quality ? L"Compress" : kind_ == Popup::Size ? L"Resize" : kind_ == Popup::Trim ? L"Trim" : kind_ == Popup::Pages ? L"Remove" : L"Crop";
     button(L + W - 20 - float(kBtnW), by, verb, true, hover_ == Part::Apply);
     button(L + W - 20 - 2 * float(kBtnW) - 8, by, L"Cancel", false, hover_ == Part::Cancel);
 
@@ -380,6 +390,15 @@ void OptionsPopup::Draw()
         surf_.DrawText(trim ? L"–" : L"×", 14, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + W / 2 - 5, T + 71, 12, 20), th.dim);
         surf_.DrawText(trim ? L"Minutes:seconds, like 1:30" : L"Leave one on auto to keep the proportions", 11, DWRITE_FONT_WEIGHT_NORMAL,
                        RectF(L + 20, T + 104, W - 40, 16), th.dim);
+    } else if (kind_ == Popup::Pages) {
+        float fw = W - 40;
+        surf_.DrawText(L"Pages to remove", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, T + 46, fw, 16), th.dim);
+        rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(L + 20, T + 64, fw, 34), 8, 8), surf_.Solid(th.button));
+        rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(L + 20.75, T + 64.75, fw - 1.5f, 32.5), 7.5f, 7.5f), surf_.Solid(th.accent), 1.5f);
+        surf_.DrawText(width_.empty() ? L"2, 5-7" : width_.c_str(), 13, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 32, T + 72, fw - 24, 20), width_.empty() ? th.dim : th.text);
+        float cw = width_.empty() ? 0 : surf_.MeasureText(width_.c_str(), 13, DWRITE_FONT_WEIGHT_NORMAL);
+        rt->DrawLine(D2D1::Point2F(L + 32 + cw + 1, T + 73), D2D1::Point2F(L + 32 + cw + 1, T + 89), surf_.Solid(th.text), 1);
+        surf_.DrawText(L"Page numbers, like 2 or 5-7, with commas between", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, T + 104, fw, 16), th.dim);
     } else if (kind_ == Popup::Crop) {
         wstring dims = std::to_wstring(int(std::lround(cw_ * origW_))) + L" × " + std::to_wstring(int(std::lround(ch_ * origH_)));
         float dw = surf_.MeasureText(dims.c_str(), 12, DWRITE_FONT_WEIGHT_NORMAL);

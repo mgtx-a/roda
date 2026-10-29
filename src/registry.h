@@ -40,13 +40,13 @@ Kind KindOfPath(const wstring& path);
 const wchar_t* KindLabel(Kind k);              // "PNG"
 inline bool IsImage(Kind k) { return (Bit(k) & kImages) != 0; }
 
-enum class Icon : uint8_t { None, Compress, Resize, Crop, Rotate, Flip, Strip, Merge, Extract, Copy, Move, Folder, Path, Terminal, Float, Share, Archive, Split, Images, Trim, Mute, Audio, Film };
+enum class Icon : uint8_t { None, Compress, Resize, Crop, Rotate, Flip, Strip, Merge, Extract, Copy, Move, Folder, Path, Terminal, Float, Share, Archive, Split, Images, Trim, Mute, Audio, Film, RemovePage };
 
 /// Optional engines: DLLs in the "engines" folder next to Roda.exe (the Full build).
 enum class Engine : uint8_t { None, Pdfium, Word, Excel, PowerPoint, Ffmpeg };   // Office apps: when installed
 bool EngineAvailable(Engine e);   // the DLL is there (checked once)
 wstring EnginePath(Engine e);
-enum class Popup : uint8_t { None, Quality, Size, Crop, Trim };
+enum class Popup : uint8_t { None, Quality, Size, Crop, Trim, Pages };
 
 // ---------------------------------------------------------------- jobs
 

@@ -238,6 +238,7 @@ const std::vector<Converter>& Converters()
         { L"pdf.split",       WheelKind::Tools, L"Split",       Bit(Kind::Pdf), Icon::Split, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.images",      WheelKind::Tools, L"Images",      Bit(Kind::Pdf), Icon::Images, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.rotate",      WheelKind::Tools, L"Rotate",      Bit(Kind::Pdf), Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
+        { L"pdf.remove",      WheelKind::Tools, L"Remove pages", Bit(Kind::Pdf), Icon::RemovePage, C::PerFile, 1, 0, Popup::Pages, RunPdfTool, Engine::Pdfium },
         { L"tool.extract",    WheelKind::Tools, L"Extract",     kArchives, Icon::Extract, C::PerFile, 1, 0, Popup::None, RunExtract },
         { L"media.trim",      WheelKind::Tools, L"Trim",        kAudio | kVideo, Icon::Trim, C::PerFile, 1, 1, Popup::Trim, RunMedia, Engine::Ffmpeg },
         { L"media.compress",  WheelKind::Tools, L"Compress",    kAudio | kVideo, Icon::Compress, C::PerFile, 1, 0, Popup::None, RunMedia, Engine::Ffmpeg },
