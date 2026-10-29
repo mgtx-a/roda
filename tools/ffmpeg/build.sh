@@ -160,7 +160,7 @@ DECODERS="h264 hevc mpeg4 msmpeg4v1 msmpeg4v2 msmpeg4v3 mpeg1video mpeg2video mj
   aac aac_latm mp3 mp3float mp2 mp1 ac3 eac3 dca flac alac opus vorbis wmav1 wmav2 wmapro wmalossless wmavoice
   amrnb amrwb truehd mlp ape wavpack tta adpcm_ima_wav adpcm_ms gsm_ms
   pcm_s16le pcm_s16be pcm_s24le pcm_s24be pcm_s32le pcm_s32be pcm_f32le pcm_f32be pcm_f64le pcm_u8 pcm_s8 pcm_alaw pcm_mulaw pcm_bluray pcm_dvd"
-DEMUXERS="mov matroska avi asf flv mpegps mpegts mpegvideo h264 hevc m4v mp3 aac ac3 eac3 dts flac ogg wav w64 aiff caf amr ape wv tta truehd gif mjpeg dv mxf ivf obu"
+DEMUXERS="image2 image_png_pipe mov matroska avi asf flv mpegps mpegts mpegvideo h264 hevc m4v mp3 aac ac3 eac3 dts flac ogg wav w64 aiff caf amr ape wv tta truehd gif mjpeg dv mxf ivf obu"
 MUXERS="mp4 mov matroska webm avi asf gif mp3 ipod wav flac ogg opus aiff image2pipe avif"
 PARSERS="h264 hevc mpeg4video mpegvideo mpegaudio aac aac_latm ac3 dca flac opus vorbis vp8 vp9 av1 mjpeg png gif vc1 h263 mlp"
 FILTERS="scale crop fps split palettegen paletteuse aresample aformat concat format null anull trim atrim setpts asetpts hflip vflip transpose"
