@@ -510,7 +510,6 @@ Kind TargetOf(const wstring& op)
     if (op == L"to.tiff") return Kind::Tiff;
     if (op == L"to.bmp") return Kind::Bmp;
     if (op == L"to.ico") return Kind::Ico;
-    if (op == L"to.avif") return Kind::Avif;
     return Kind::Unknown;
 }
 
@@ -622,7 +621,6 @@ bool EncodeImage(const Image& img, Kind kind, int quality, bool lossless, std::v
             break;
         }
         case Kind::Ico: return EncodeIco(img, out, err);
-        case Kind::Avif: return EncodeAvif(Flattened(img), quality, out, err);   // AV1 stills through FFmpeg; no transparency (yet)
         case Kind::Pdf: {
             PdfWriter pdf;
             pdf.AddImage(img, nullptr, 85);

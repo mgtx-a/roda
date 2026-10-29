@@ -187,7 +187,7 @@ const std::vector<Converter>& Converters()
 {
     static const std::vector<Converter> table = {
         // Convert: one output per input, named after the target. A PDF only shows up on these wheels
-        // when PDFium is there. AVIF and HEIC output need encoders Roda doesn't ship yet.
+        // when PDFium is there. No AVIF or HEIC output: their encoders would double the size of the Full build.
         { L"to.jpg",  WheelKind::Convert, L"JPG",  kImages | Bit(Kind::Pdf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.png",  WheelKind::Convert, L"PNG",  kImages | Bit(Kind::Pdf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.webp", WheelKind::Convert, L"WEBP", kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
@@ -195,7 +195,6 @@ const std::vector<Converter>& Converters()
         { L"to.tiff", WheelKind::Convert, L"TIFF", kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.bmp",  WheelKind::Convert, L"BMP",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.ico",  WheelKind::Convert, L"ICO",  kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
-        { L"to.avif", WheelKind::Convert, L"AVIF", kImages, Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert, Engine::Ffmpeg },
         { L"to.docx", WheelKind::Convert, L"DOCX", Bit(Kind::Pdf) | Bit(Kind::Markdown) | Bit(Kind::Txt) | Bit(Kind::Html) | Bit(Kind::Rtf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.html", WheelKind::Convert, L"HTML", Bit(Kind::Docx) | Bit(Kind::Markdown) | Bit(Kind::Rtf) | Bit(Kind::Txt), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },
         { L"to.md",   WheelKind::Convert, L"MD",   Bit(Kind::Pdf) | Bit(Kind::Docx) | Bit(Kind::Html) | Bit(Kind::Rtf), Icon::None, C::PerFile, 1, 0, Popup::None, RunConvert },

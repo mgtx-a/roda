@@ -241,32 +241,6 @@ bool FfmpegImage(const wstring& path, std::vector<uint8_t>& png, wstring& err)
     return true;
 }
 
-bool EncodeAvif(const Image& img, int quality, std::vector<uint8_t>& out, wstring& err)
-{
-    if (GetFileAttributesW(Tool(L"ffmpeg.exe").c_str()) == INVALID_FILE_ATTRIBUTES) { err = L"AVIF needs the Full build (engines\\ffmpeg)."; return false; }
-    // Through a lossless PNG in the worker's temp folder: FFmpeg reads that, AV1 (libaom) writes the still.
-    std::vector<uint8_t> png;
-    if (!EncodeImage(img, Kind::Png, 0, true, png, err)) return false;
-    wchar_t tmp[MAX_PATH];
-    GetTempPathW(MAX_PATH, tmp);
-    wstring dir = JoinPath(JoinPath(tmp, L"Roda"), L"avif-" + std::to_wstring(GetCurrentProcessId()));
-    EnsureDir(dir);
-    wstring in = JoinPath(dir, L"in.png"), outPath = JoinPath(dir, L"out.avif");
-    bool ok = WriteAllBytes(in, png.data(), png.size());
-    int crf = std::clamp(63 - quality * 63 / 100, 10, 50);   // AV1 counts the other way (lower is better): quality 82 -> 12
-    Run run;
-    ok = ok && RunTool(L"ffmpeg.exe", { L"-nostdin", L"-v", L"error", L"-protocol_whitelist", L"file", L"-y", L"-i", L"file:" + in, L"-c:v", L"libaom-av1",
-                                        L"-still-picture", L"1", L"-crf", std::to_wstring(crf), L"-cpu-used", L"6", L"-pix_fmt", L"yuv420p",
-                                        L"-vf", L"scale=trunc(iw/2)*2:trunc(ih/2)*2", L"-f", L"avif", L"file:" + outPath }, run, nullptr, nullptr) && run.code == 0;
-    wstring readErr;
-    ok = ok && ReadShared(outPath, out, readErr) && !out.empty();
-    DeleteFileW(in.c_str());
-    DeleteFileW(outPath.c_str());
-    RemoveDirectoryW(dir.c_str());
-    if (!ok) err = L"Could not write the AVIF picture.";
-    return ok;
-}
-
 bool RunMedia(const Job& job, const Progress& p, Result& r)
 {
     if (GetFileAttributesW(Tool(L"ffmpeg.exe").c_str()) == INVALID_FILE_ATTRIBUTES) { r.error = L"Audio and video need the Full build (engines\\ffmpeg is missing)."; return false; }

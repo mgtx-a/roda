@@ -36,13 +36,12 @@ their DLLs; Roda runs them from a worker for audio and video only; without them 
 | libogg | 1.3.5 | BSD-3-Clause | https://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.xz `c4d91be36fc8e54deae7575241e03f4211eb102afb3fc0775fbbc1b740016705` |
 | libvorbis | 1.3.7 | BSD-3-Clause | https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.xz `b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b` |
 | libvpx (VP9 encoder) | 1.16.0 | BSD-3-Clause + patent grant | https://github.com/webmproject/libvpx/archive/refs/tags/v1.16.0.tar.gz `7a479a3c66b9f5d5542a4c6a1b7d3768a983b1e5c14c60a9396edc9b649e015c` |
-| libaom (AV1 encoder, AVIF) | 3.15.1 | BSD-2-Clause + AOM patent licence | https://storage.googleapis.com/aom-releases/libaom-3.15.1.tar.gz `8ca0c52746174603500f0adb6f2a215d69c9ca2aab2acb3caa06fb791d8d01bf` |
 | dav1d (AV1 decoder) | 1.5.3 | BSD-2-Clause | https://github.com/videolan/dav1d/archive/refs/tags/1.5.3.tar.gz `cbe212b02faf8c6eed5b6d55ef8a6e363aaab83f15112e960701a9c3df813686` |
 | zlib | 1.3.1 | zlib | https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz `9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23` |
 
 Built in CI on Linux with llvm-mingw 20261006 (`5f9c6ed95b2d4bdb2869a488c5fd5857fbdabcf288a0aa3eb1da43f6a08d8ab4`).
 It contains only the encoders, formats and filters Roda uses (decoding is broad), and no network code
-at all (`--disable-network`, protocols `file` and `pipe` only). About 24 MB on x64, 16.5 MB on ARM64.
+at all (`--disable-network`, protocols `file` and `pipe` only). About 14 MB on x64, 9 MB on ARM64.
 
 LGPL: the DLLs are separate files that anyone may replace with their own build of the same FFmpeg
 version; `tools/ffmpeg/build.sh` rebuilds them exactly from the sources above. The licence texts ship in

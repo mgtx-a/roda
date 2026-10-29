@@ -31,7 +31,6 @@ opus-1.5.2.tar.gz https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz 65c
 libogg-1.3.5.tar.xz https://downloads.xiph.org/releases/ogg/libogg-1.3.5.tar.xz c4d91be36fc8e54deae7575241e03f4211eb102afb3fc0775fbbc1b740016705
 libvorbis-1.3.7.tar.xz https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.xz b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b
 libvpx-1.16.0.tar.gz https://github.com/webmproject/libvpx/archive/refs/tags/v1.16.0.tar.gz 7a479a3c66b9f5d5542a4c6a1b7d3768a983b1e5c14c60a9396edc9b649e015c
-libaom-3.15.1.tar.gz https://storage.googleapis.com/aom-releases/libaom-3.15.1.tar.gz 8ca0c52746174603500f0adb6f2a215d69c9ca2aab2acb3caa06fb791d8d01bf
 dav1d-1.5.3.tar.gz https://github.com/videolan/dav1d/archive/refs/tags/1.5.3.tar.gz cbe212b02faf8c6eed5b6d55ef8a6e363aaab83f15112e960701a9c3df813686
 "
 
@@ -119,17 +118,6 @@ build_vpx() {   # the VP9 encoder only: FFmpeg decodes VP8 and VP9 itself
    && make -j"$JOBS" && make install)
 }
 
-build_aom() {   # the AV1 encoder only (AVIF pictures); dav1d decodes AV1
-  local d; d=$(unpack libaom-3.15.1.tar.gz libaom-3.15.1)
-  local nasm=-DENABLE_NASM=OFF; [ "$ARCH" = x64 ] && nasm=-DENABLE_NASM=ON
-  cmake -S "$d" -B "$d/out" -G Ninja -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR="$CMAKE_CPU" \
-    -DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" -DCMAKE_RC_COMPILER="$HOST-windres" -DCMAKE_AR="$TC/bin/llvm-ar" \
-    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PREFIX" -DAOM_TARGET_CPU="$AOM_CPU" "$nasm" \
-    -DBUILD_SHARED_LIBS=OFF -DENABLE_DOCS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_TESTS=OFF -DENABLE_TOOLS=OFF \
-    -DCONFIG_AV1_DECODER=0 -DCONFIG_AV1_HIGHBITDEPTH=0 >/dev/null
-  cmake --build "$d/out" -j"$JOBS" && cmake --install "$d/out" >/dev/null
-}
-
 build_dav1d() {
   local d; d=$(unpack dav1d-1.5.3.tar.gz dav1d-1.5.3)
   cat > "$d/cross.txt" <<EOF
@@ -154,14 +142,14 @@ EOF
 # What Roda asks of it (src/conv/media.cpp, src/conv/image.cpp). Decoding is broad: anything a person
 # might drop. Encoding is exactly the encoders Roda names. d3d11va only because the Media Foundation
 # encoder (h264_mf) is written against it; Windows has Direct3D 11 itself.
-ENCODERS="libmp3lame aac flac libopus libvorbis wmav2 pcm_s16le pcm_s16be h264_mf libvpx_vp9 libaom_av1 mpeg4 wmv2 gif png"
+ENCODERS="libmp3lame aac flac libopus libvorbis wmav2 pcm_s16le pcm_s16be h264_mf libvpx_vp9 mpeg4 wmv2 gif png"
 DECODERS="h264 hevc mpeg4 msmpeg4v1 msmpeg4v2 msmpeg4v3 mpeg1video mpeg2video mjpeg mjpegb vp8 vp9 libdav1d theora
   wmv1 wmv2 wmv3 vc1 h263 flv prores dnxhd dvvideo png gif webp bmp rawvideo svq3 cinepak
   aac aac_latm mp3 mp3float mp2 mp1 ac3 eac3 dca flac alac opus vorbis wmav1 wmav2 wmapro wmalossless wmavoice
   amrnb amrwb truehd mlp ape wavpack tta adpcm_ima_wav adpcm_ms gsm_ms
   pcm_s16le pcm_s16be pcm_s24le pcm_s24be pcm_s32le pcm_s32be pcm_f32le pcm_f32be pcm_f64le pcm_u8 pcm_s8 pcm_alaw pcm_mulaw pcm_bluray pcm_dvd"
 DEMUXERS="image2 image_png_pipe mov matroska avi asf flv mpegps mpegts mpegvideo h264 hevc m4v mp3 aac ac3 eac3 dts flac ogg wav w64 aiff caf amr ape wv tta truehd gif mjpeg dv mxf ivf obu"
-MUXERS="mp4 mov matroska webm avi asf gif mp3 ipod wav flac ogg opus aiff image2pipe avif"
+MUXERS="mp4 mov matroska webm avi asf gif mp3 ipod wav flac ogg opus aiff image2pipe"
 PARSERS="h264 hevc mpeg4video mpegvideo mpegaudio aac aac_latm ac3 dca flac opus vorbis vp8 vp9 av1 mjpeg png gif vc1 h263 mlp"
 FILTERS="scale crop fps split palettegen paletteuse aresample aformat concat format null anull trim atrim setpts asetpts hflip vflip transpose"
 
@@ -176,13 +164,13 @@ build_ffmpeg() {
       --enable-shared --disable-static --enable-small --disable-debug --disable-doc --disable-ffplay --disable-avdevice \
       --disable-everything --disable-autodetect --disable-network \
       --enable-w32threads --enable-mediafoundation --enable-d3d11va --enable-zlib \
-      --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libaom --enable-libdav1d \
+      --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libdav1d \
       --enable-protocol=file --enable-protocol=pipe --enable-bsfs \
       $(list encoder "$ENCODERS") $(list decoder "$DECODERS") $(list demuxer "$DEMUXERS") \
       $(list muxer "$MUXERS") $(list parser "$PARSERS") $(list filter "$FILTERS") > "$WORK/configure-$ARCH.txt")
   # configure only warns when a name matches nothing: fail loudly instead.
   if grep -i "did not match anything" "$WORK/configure-$ARCH.txt"; then exit 1; fi
-  for lib in libmp3lame libopus libvorbis libvpx libaom libdav1d mediafoundation zlib; do
+  for lib in libmp3lame libopus libvorbis libvpx libdav1d mediafoundation zlib; do
     sed -n '/^External libraries/,/^Enabled programs/p' "$WORK/configure-$ARCH.txt" | grep -qw "$lib" || { echo "configure did not take $lib"; exit 1; }
   done
   make -C "$d" -j"$JOBS" && make -C "$d" install
@@ -198,7 +186,7 @@ report() {   # what each part adds: code + data of each static library, and of F
     printf '%8d  %s (own code)\n' "$(( $(find "$d/$lib" -name '*.o' -print0 | xargs -0 llvm-size -t 2>/dev/null | tail -1 | awk '{print $1+$2}') / 1024 ))" "$lib"
   done
   echo "== biggest objects in libavcodec (KB)"
-  find "$d/libavcodec" -name '*.o' -print0 | xargs -0 llvm-size 2>/dev/null | awk 'NR>1 {printf "%8d  %s\n", ($1+$2)/1024, $NF}' | sort -rn | head -25
+  find "$d/libavcodec" -name '*.o' -print0 | xargs -0 llvm-size 2>/dev/null | awk 'NR>1 {printf "%8d  %s\n", ($1+$2)/1024, $NF}' | sort -rn | sed -n 1,25p
 }
 
 collect() {
@@ -214,8 +202,6 @@ collect() {
   cp "$s/libvorbis-1.3.7/COPYING"     "$OUT/licenses/Vorbis.txt"
   cp "$s/libvpx-1.16.0/LICENSE"       "$OUT/licenses/libvpx.txt"
   cp "$s/libvpx-1.16.0/PATENTS"       "$OUT/licenses/libvpx-PATENTS.txt"
-  cp "$s/libaom-3.15.1/LICENSE"       "$OUT/licenses/libaom.txt"
-  cp "$s/libaom-3.15.1/PATENTS"       "$OUT/licenses/libaom-PATENTS.txt"
   cp "$s/dav1d-1.5.3/COPYING"         "$OUT/licenses/dav1d.txt"
   # Nothing but Windows' own DLLs (and our own) may be needed.
   for f in "$OUT"/*.exe "$OUT"/*.dll; do
@@ -233,7 +219,6 @@ build_ogg
 build_vorbis
 build_opus
 build_vpx
-build_aom
 build_dav1d
 build_ffmpeg
 collect

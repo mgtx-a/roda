@@ -57,7 +57,7 @@ The first time you start Roda, a short tour shows you how it works.
 
 | Files | Change into | Tools |
 |---|---|---|
-| **Photos** (JPG, PNG, WebP, GIF, BMP, TIFF, ICO, SVG, HEIC, AVIF) | JPG, PNG, WebP, PDF, TIFF, BMP, ICO, AVIF | Make smaller, resize, crop, rotate, flip, remove photo info, join into one PDF |
+| **Photos** (JPG, PNG, WebP, GIF, BMP, TIFF, ICO, SVG, HEIC, AVIF) | JPG, PNG, WebP, PDF, TIFF, BMP, ICO | Make smaller, resize, crop, rotate, flip, remove photo info, join into one PDF |
 | **PDFs** \* | Pictures (PNG, JPG), text, Word (DOCX), ebook (EPUB), PowerPoint (PPTX) | Split into pages, take out the pictures, rotate, join PDFs |
 | **Documents** (Word DOCX, Markdown, HTML, RTF, TXT) | Each other, and ebook (EPUB) | |
 | **Word, Excel, PowerPoint** | PDF (only if Microsoft Office is on your PC) | |
@@ -85,7 +85,7 @@ Changes work straight away.
 - Read text from scanned PDFs, or open password-protected PDFs.
 - Turn Word files into PDF without Microsoft Office.
 - Open RAR files.
-- Keep transparent backgrounds when saving as AVIF (they turn white).
+- Save pictures as AVIF or HEIC (it can open them, but not save them).
 - Work with touch screens or pens.
 - Other languages besides English.
 - Take files dragged from a program that runs as administrator (Windows blocks this).
