@@ -64,7 +64,7 @@ fi
 export PATH="$TC/bin:$PATH"
 export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig" PKG_CONFIG_PATH=""
 export CC="$HOST-clang" CXX="$HOST-clang++" AR=llvm-ar RANLIB=llvm-ranlib NM=llvm-nm STRIP=llvm-strip
-OPT="-O2"
+OPT="-Os"   # the audio libraries and zlib: small, and fast enough at -Os
 AUTOCONF=(--host="$HOST" --prefix="$PREFIX" --enable-static --disable-shared)
 
 newer_config() {   # old autotools scripts may not know aarch64-w64-mingw32
@@ -173,7 +173,7 @@ build_ffmpeg() {
       --cross-prefix="$HOST-" --cc="$CC" --cxx="$CXX" --ar=llvm-ar --ranlib=llvm-ranlib --nm=llvm-nm --strip=llvm-strip \
       --pkg-config=pkg-config --pkg-config-flags=--static \
       --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" \
-      --enable-shared --disable-static --disable-debug --disable-doc --disable-ffplay --disable-avdevice \
+      --enable-shared --disable-static --enable-small --disable-debug --disable-doc --disable-ffplay --disable-avdevice \
       --disable-everything --disable-autodetect --disable-network \
       --enable-w32threads --enable-mediafoundation --enable-d3d11va --enable-zlib \
       --enable-libmp3lame --enable-libopus --enable-libvorbis --enable-libvpx --enable-libaom --enable-libdav1d \
@@ -186,6 +186,19 @@ build_ffmpeg() {
     sed -n '/^External libraries/,/^Enabled programs/p' "$WORK/configure-$ARCH.txt" | grep -qw "$lib" || { echo "configure did not take $lib"; exit 1; }
   done
   make -C "$d" -j"$JOBS" && make -C "$d" install
+}
+
+report() {   # what each part adds: code + data of each static library, and of FFmpeg's own objects
+  echo "== sizes (text+data, KB)"
+  for a in "$PREFIX"/lib/*.a; do
+    printf '%8d  %s\n' "$(( $(llvm-size -t "$a" 2>/dev/null | tail -1 | awk '{print $1+$2}') / 1024 ))" "$(basename "$a")"
+  done
+  local d="$WORK/src-$ARCH/ffmpeg-8.1.3"
+  for lib in libavcodec libavformat libavfilter libavutil libswscale; do
+    printf '%8d  %s (own code)\n' "$(( $(find "$d/$lib" -name '*.o' -print0 | xargs -0 llvm-size -t 2>/dev/null | tail -1 | awk '{print $1+$2}') / 1024 ))" "$lib"
+  done
+  echo "== biggest objects in libavcodec (KB)"
+  find "$d/libavcodec" -name '*.o' -print0 | xargs -0 llvm-size 2>/dev/null | awk 'NR>1 {printf "%8d  %s\n", ($1+$2)/1024, $NF}' | sort -rn | head -25
 }
 
 collect() {
@@ -224,3 +237,4 @@ build_aom
 build_dav1d
 build_ffmpeg
 collect
+report
