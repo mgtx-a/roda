@@ -10,11 +10,11 @@ constexpr double kW = 540, kPad = 24, kTop = 64, kRowH = 44, kLabelW = 190;
 constexpr double kCtlX = kPad + kLabelW, kCtlW = kW - kPad - kCtlX;
 constexpr double kShadow = 26;   // room around the card for its shadow
 
-enum Row { RConvert, RTools, RActions, RHotkey, RSave, RFolder, RJpeg, RWebp, RDpi, RMeta, RTheme, RStartup, RCount };
+enum Row { RConvert, RTools, RActions, RHotkey, RSave, RFolder, RJpeg, RWebp, RDpi, RMeta, RTheme, RStartup, RExplorer, RCount };
 
 const wchar_t* kLabels[RCount] = { L"Convert wheel key", L"Tools wheel key", L"Actions wheel key", L"Hotkey for selected files",
                                    L"Save results", L"Folder", L"JPEG quality", L"WebP quality", L"PDF pages as pictures",
-                                   L"Photo info (EXIF)", L"Look", L"Start with Windows" };
+                                   L"Photo info (EXIF)", L"Look", L"Start with Windows", L"Right-click in Explorer" };
 
 double H() { return kTop + RCount * kRowH + 22; }
 const int kTriggerKeys[3] = { VK_SHIFT, VK_CONTROL, VK_MENU };
@@ -28,7 +28,7 @@ std::vector<const wchar_t*> Choices(int row)
         case RDpi: return { L"150 DPI", L"300 DPI", L"600 DPI" };
         case RMeta: return { L"Keep", L"Remove" };
         case RTheme: return { L"As Windows", L"Light", L"Dark" };
-        case RStartup: return { L"Off", L"On" };
+        case RStartup: case RExplorer: return { L"Off", L"On" };
         default: return {};
     }
 }
@@ -175,6 +175,7 @@ void SettingsWindow::Click(const Hit& h, double x)
         case RMeta: s_.keepMetadata = c == 0; break;
         case RTheme: s_.theme = std::clamp(c, 0, 2); SetThemeOverride(s_.theme); if (onThemeChanged) onThemeChanged(); break;
         case RStartup: if (setStartup) setStartup(c == 1); break;
+        case RExplorer: if (setExplorerMenu) setExplorerMenu(c == 1); break;
     }
     s_.Save();
     dirty_ = true;
@@ -279,6 +280,7 @@ void SettingsWindow::Draw()
                 case RMeta: selected = s_.keepMetadata ? 0 : 1; break;
                 case RTheme: selected = s_.theme; break;
                 case RStartup: selected = startup ? 1 : 0; break;
+                case RExplorer: selected = explorerMenuOn && explorerMenuOn() ? 1 : 0; break;
             }
             float segW = cw / float(choices.size());
             rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(cx, cy, cw, ch), 8, 8), surf_.Solid(th.button));

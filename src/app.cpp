@@ -84,6 +84,40 @@ void SetStartup(bool on)
         Log(L"start with Windows: could not write %s", lnk.c_str());
 }
 
+// ---------------------------------------------------------------- the optional Explorer entry
+// The one thing Roda writes to the registry, and only when asked (Settings): a "Roda…" verb for files
+// and folders under HKEY_CURRENT_USER (no admin rights), removed again when switched off.
+
+const wchar_t* kVerbKeys[] = { L"Software\\Classes\\*\\shell\\Roda", L"Software\\Classes\\Directory\\shell\\Roda" };
+
+bool ExplorerMenuOn()
+{
+    wchar_t cmd[1024] = L"";
+    DWORD size = sizeof cmd;
+    if (RegGetValueW(HKEY_CURRENT_USER, (wstring(kVerbKeys[0]) + L"\\command").c_str(), nullptr, RRF_RT_REG_SZ, nullptr, cmd, &size) != ERROR_SUCCESS) return false;
+    return wcsstr(cmd, ExePath().c_str()) != nullptr;   // another copy's entry is not ours
+}
+
+void SetExplorerMenu(bool on)
+{
+    for (auto* key : kVerbKeys) {
+        if (!on) { RegDeleteTreeW(HKEY_CURRENT_USER, key); continue; }
+        HKEY k = nullptr, c = nullptr;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, key, 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) != ERROR_SUCCESS) continue;
+        auto set = [](HKEY h, const wchar_t* name, const wstring& v) { RegSetValueExW(h, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(v.c_str()), DWORD((v.size() + 1) * 2)); };
+        set(k, L"MUIVerb", L"Roda…");
+        set(k, L"Icon", L"\"" + ExePath() + L"\",0");
+        set(k, L"MultiSelectModel", L"Player");   // a selection of many files is one wheel, not one per file
+        if (RegCreateKeyExW(k, L"command", 0, nullptr, 0, KEY_WRITE, nullptr, &c, nullptr) == ERROR_SUCCESS) {
+            set(c, nullptr, L"\"" + ExePath() + L"\" --open \"%1\"");
+            RegCloseKey(c);
+        }
+        RegCloseKey(k);
+    }
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+    Log(on ? L"explorer menu: added (HKCU\\Software\\Classes\\*\\shell\\Roda and Directory\\shell\\Roda)" : L"explorer menu: removed");
+}
+
 // ---------------------------------------------------------------- the app
 
 struct App {
@@ -124,6 +158,8 @@ struct App {
         };
         settingsUi.startupOn = [] { return StartupOn(); };
         settingsUi.setStartup = [](bool on) { if (on != StartupOn()) SetStartup(on); };
+        settingsUi.explorerMenuOn = [] { return ExplorerMenuOn(); };
+        settingsUi.setExplorerMenu = [](bool on) { if (on != ExplorerMenuOn()) SetExplorerMenu(on); };
         tour.onFinished = [this] { if (!settings.welcomed) { settings.welcomed = true; settings.Save(); } };
         // First run: the tour, once things have settled.
         if (!settings.welcomed && !TestMode()) After(1.5, [this] { StartTour(); });
@@ -175,6 +211,13 @@ struct App {
         j.op = op;
         j.inputs = std::move(inputs);
         j.outDir = settings.outputFolder;
+        // Files that came out of an Outlook mail or a ZIP live in Roda's temp folder: results go to the
+        // chosen output folder, or Downloads, never next to them.
+        if (j.outDir.empty() && !j.inputs.empty() && j.inputs[0].rfind(TempDir(), 0) == 0) {
+            PWSTR p = nullptr;
+            if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, nullptr, &p)) && p) j.outDir = p;
+            CoTaskMemFree(p);
+        }
         j.opts.Set(L"jpegQ", settings.jpegQuality).Set(L"webpQ", settings.webpQuality).Set(L"keepMeta", settings.keepMetadata).Set(L"dpi", settings.pdfDpi);
         for (auto& [k, v] : extra.obj) j.opts.Set(k.c_str(), v);
         return j;
@@ -203,6 +246,33 @@ struct App {
             if (s.phase != JobState::Done) { cards.Note(FileName(path), s.error.empty() ? L"Could not open this picture." : s.error, true); return; }
             then(s.out, int(s.info[L"info"][L"w"].Num()), int(s.info[L"info"][L"h"].Num()));
         };
+    }
+
+    std::vector<wstring> opened;     // paths from "Roda…" in Explorer, gathered for a moment
+    std::vector<wstring> lastOpened; // the last batch shown, in case more of the same selection arrives
+    double lastOpenedAt = -10;
+    uint32_t openToken = 0;
+
+    void Open(const wstring& path)
+    {
+        if (path.empty()) return;
+        opened.push_back(path);
+        uint32_t t = ++openToken;
+        // Explorer starts the verb once per selected file, each a moment apart: wait for the rest, then
+        // one wheel for all. Stragglers after that join the wheel already open.
+        After(1.0, [this, t] {
+            if (t != openToken || opened.empty() || settings.paused) return;
+            std::vector<wstring> paths = std::move(opened);
+            opened.clear();
+            if (wheel.open() && Now() - lastOpenedAt < 3) {
+                paths.insert(paths.begin(), lastOpened.begin(), lastOpened.end());
+                wheel.Hide(false);
+            } else if (wheel.open()) return;
+            lastOpened = paths;
+            lastOpenedAt = Now();
+            Log(L"explorer menu: %d item(s)", int(paths.size()));
+            wheel.ShowForKeyboard(paths);
+        });
     }
 
     void StartTour()
@@ -419,6 +489,11 @@ LRESULT CALLBACK MsgProc(HWND h, UINT m, WPARAM w, LPARAM l)
             if (g_app) g_app->trigger.OnRawInput(reinterpret_cast<HRAWINPUT>(l));
             return DefWindowProcW(h, m, w, l);   // lets Windows free the input
         case WM_SHOW_SETTINGS: if (g_app) g_app->settingsUi.Show(); return 0;
+        case WM_COPYDATA: {
+            auto* cd = reinterpret_cast<COPYDATASTRUCT*>(l);
+            if (g_app && cd && cd->dwData == 1 && cd->cbData >= 2) g_app->Open(wstring(static_cast<const wchar_t*>(cd->lpData), cd->cbData / 2 - 1));
+            return TRUE;
+        }
         case WM_SHOW_TOUR: if (g_app) g_app->StartTour(); return 0;
         case WM_HOTKEY:
             if (g_app && w == HOTKEY_WHEEL) g_app->OnHotkey();
@@ -479,13 +554,30 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int)
     wstring lockName = L"Roda.SingleInstance";
     if (TestMode()) lockName += L".Test." + std::to_wstring(std::hash<wstring>{}(DataDir()) % 1000000);
     HANDLE mutex = CreateMutexW(nullptr, TRUE, lockName.c_str());
-    if (!mutex || GetLastError() == ERROR_ALREADY_EXISTS) {
-        // Roda is already running: starting it again opens its Settings (or the tour, with --tour).
-        if (HWND other = FindWindowW(L"RodaMessages", lockName.c_str())) {
+    bool another = !mutex || GetLastError() == ERROR_ALREADY_EXISTS;   // read now: later calls overwrite the error
+    // "Roda.exe --open <path>": from the Explorer entry.
+    wstring openPath;
+    {
+        int n = 0;
+        wchar_t** a = CommandLineToArgvW(GetCommandLineW(), &n);
+        for (int i = 1; i + 1 < n; i++) if (!wcscmp(a[i], L"--open")) openPath = a[i + 1];
+        LocalFree(a);
+    }
+    if (another) {
+        // Roda is already running: hand it the path, or open its Settings (or the tour, with --tour).
+        // It may be starting this very moment (several files opened at once): wait for its window.
+        HWND other = nullptr;
+        for (int i = 0; i < 30 && !other; i++) { other = FindWindowW(L"RodaMessages", lockName.c_str()); if (!other) Sleep(100); }
+        if (other) {
             DWORD pid = 0;
             GetWindowThreadProcessId(other, &pid);
             AllowSetForegroundWindow(pid);
-            PostMessageW(other, wcsstr(GetCommandLineW(), L"--tour") ? WM_SHOW_TOUR : WM_SHOW_SETTINGS, 0, 0);
+            if (!openPath.empty()) {
+                COPYDATASTRUCT cd{ 1, DWORD((openPath.size() + 1) * 2), const_cast<wchar_t*>(openPath.c_str()) };
+                SendMessageTimeoutW(other, WM_COPYDATA, 0, LPARAM(&cd), SMTO_ABORTIFHUNG, 3000, nullptr);
+            } else {
+                PostMessageW(other, wcsstr(GetCommandLineW(), L"--tour") ? WM_SHOW_TOUR : WM_SHOW_SETTINGS, 0, 0);
+            }
         }
         return 0;
     }
@@ -505,6 +597,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int)
         App app;
         g_app = &app;
         app.Start(inst);
+        if (!openPath.empty()) app.Open(openPath);   // started by the Explorer entry
         rc = app.Run();
         app.Shutdown();
         Log(L"quit");

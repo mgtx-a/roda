@@ -395,7 +395,12 @@ DWORD Wheel::OnDrop(IDataObject* data, POINTL pt, DWORD allowed)
         return DROPEFFECT_NONE;
     }
     std::vector<wstring> paths;
-    if (ReadDroppedPaths(data, paths)) paths_ = paths;
+    wstring err;
+    if (HasVirtualFiles(data) && !HasFilesOnDisk(data)) {
+        // Outlook attachments, files inside a ZIP: copied out now, while the source still offers them.
+        if (ExtractVirtualFiles(data, paths, err)) paths_ = paths;
+        else { Log(L"drop: %s", err.c_str()); dropped_ = true; Hide(); return DROPEFFECT_NONE; }
+    } else if (ReadDroppedPaths(data, paths)) paths_ = paths;
     Choose(h);
     return CopyEffect(allowed);
 }

@@ -6,7 +6,7 @@ namespace rd {
 
 namespace {
 
-constexpr double kProbeWindow = 0.4;    // how long after the drag threshold a drag source may take to show itself
+constexpr double kProbeWindow = 1.5;    // how long after the drag threshold a drag source may take to show itself (Explorer's ZIP folders take ~0.4 s)
 constexpr double kKeyPoll = 0.016;      // the keys are read this often during a file drag, never otherwise
 constexpr int kProbeSize = 48;          // pixels: big enough that a quick flick stays over it
 // DoDragDrop gives the mouse capture to this hidden OLE window for the whole drag. A text

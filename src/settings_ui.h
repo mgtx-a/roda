@@ -16,6 +16,8 @@ public:
     std::function<void()> onKeysChanged;       // trigger keys or hotkey: re-register
     std::function<bool()> startupOn;           // Start with Windows: is it on, and switch it
     std::function<void(bool)> setStartup;
+    std::function<bool()> explorerMenuOn;      // the optional "Roda…" entry in Explorer's right-click menu
+    std::function<void(bool)> setExplorerMenu;
     std::function<void()> onThemeChanged;
 
     bool dirty() const { return dirty_; }

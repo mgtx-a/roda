@@ -4,9 +4,9 @@ Roda (Malay for "wheel") is a portable, offline file converter for Windows 10 an
 Shift, Ctrl or Alt, and a wheel of options opens under the pointer. Drop the file on an option and it is
 converted or acted on, locally.
 
-> **Status: Phase 5, awaiting hand-tests.** Pictures, PDFs, documents, spreadsheets, subtitles, audio,
-> video, archives and file actions work; there is a Settings window and a first-run tour. Phase 6
-> (extras) is what remains.
+> **Status: Phase 6, awaiting hand-tests.** Pictures, PDFs, documents, spreadsheets, subtitles, audio,
+> video, archives and file actions work; there is a Settings window, a first-run tour, an optional
+> right-click entry in Explorer, and files can come straight out of ZIPs and Outlook mails.
 
 ## Download
 Not released yet (builds from every push are under the repository's Actions tab). Two builds, for x64 and ARM64, neither needing an installer, admin rights or a runtime:
@@ -26,6 +26,12 @@ Not released yet (builds from every push are under the repository's Actions tab)
    release outside the wheel (the files then go wherever you dropped them, as usual).
 5. A card in the bottom-right corner shows the progress, then **Saved as photo.webp** with **Open** and
    **Show in folder**. Click the cross on a running card to cancel it. Failures say what went wrong.
+
+Files inside a ZIP opened in Explorer, and Outlook attachments, can be dragged straight onto the wheel:
+Roda copies them out first. Their results go to the output folder you chose, or to Downloads.
+
+Or switch on **Right-click in Explorer** in Settings: files and folders then get a "Roda…" entry (on
+Windows 11 under *Show more options*) that opens the wheel for the selection.
 
 Without dragging: select files in Explorer or on the desktop and press **Ctrl+Alt+R**. The wheel opens
 with the keyboard in charge: arrows choose, **Tab** switches wheel, **Enter** applies, **Esc** cancels.
@@ -87,14 +93,14 @@ Good to know:
 - **Settings** (tray → *Settings…*, or start `Roda.exe` again while it runs): the three wheel keys,
   the hotkey (click it and press the new keys), where results go (next to each file or one folder),
   JPEG and WebP quality, PDF pages as pictures (150/300/600 DPI), photo info kept or removed, the look
-  (as Windows, light, dark) and Start with Windows. Changes apply at once. They live in `settings.json`.
+  (as Windows, light, dark), Start with Windows and the right-click entry. Changes apply at once. They live in `settings.json`.
 - **The tour** shows on the first start and walks through a first conversion; tray → *Take the tour*
   shows it again.
 
 Known limits: a drag from an app running as administrator can't open the wheel (Windows does not let a
 normal app receive drops from an elevated one); don't run Roda as administrator to get around it.
 A PDF made of scanned pages has no text to extract (no OCR); password-protected PDFs are refused with a
-plain message. Not yet: RAR extraction, HEIC output, transparent AVIF, Share, PDF to XLSX, PDF compression, DOCX →
+plain message. Not yet: touch and pen dragging (needs a device to test on), other languages, RAR extraction, HEIC output, transparent AVIF, Share, PDF to XLSX, PDF compression, DOCX →
 PDF without Office installed, joining videos, a still from a video as a picture.
 
 ## Privacy & permissions
@@ -127,7 +133,12 @@ What it touches:
   cleaned up at the next start.
 - **Start with Windows** (tray menu): a `Roda.lnk` shortcut in your Startup folder, removed when you
   untick it.
-- **Registry:** nothing is written. The light/dark theme setting is only read.
+- **Registry:** nothing is written, except the optional right-click entry when you switch it on in
+  Settings (`HKEY_CURRENT_USER\Software\Classes\*\shell\Roda` and `...\Directory\shell\Roda`);
+  switching it off removes both. Read only: the light/dark theme, and whether Word, Excel and
+  PowerPoint are installed.
+- **Dragged-out files:** files from ZIPs opened in Explorer or from Outlook are copied to
+  `%TEMP%\Roda\<process id>` during the drop, and deleted when Roda quits.
 
 ## Command line
 For scripts and tests (`start /wait` from cmd, as Roda.exe is a Windows app):
