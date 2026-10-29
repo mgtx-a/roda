@@ -130,6 +130,7 @@ Roda can also convert from a script (use `start /wait` in cmd):
     Roda.exe --convert report.pdf report.docx
     Roda.exe --convert report.pdf outdir\ --op to.png --option dpi=150
     Roda.exe --convert report.pdf outdir\ --op pdf.split
+    Roda.exe --convert report.pdf short.pdf --op pdf.remove --option "pages=2, 5-7"
     Roda.exe --convert book.xlsx book.csv
     Roda.exe --convert video.mkv video.mp4
     Roda.exe --convert video.mp4 clip.mp4 --op media.trim --option start=12 --option end=45
