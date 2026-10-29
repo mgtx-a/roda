@@ -19,7 +19,7 @@ esac
 WORK="$(realpath -m "${WORK:-ffwork}")"
 PREFIX="$WORK/prefix-$ARCH"
 JOBS="$(nproc)"
-mkdir -p "$WORK/dl" "$WORK/src-$ARCH" "$PREFIX" "$OUT"
+mkdir -p "$WORK/dl" "$WORK/src-$ARCH" "$PREFIX/lib" "$PREFIX/include" "$OUT"
 
 # name  url  sha256
 SOURCES="
