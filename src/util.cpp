@@ -510,6 +510,9 @@ void Settings::Save() const
     }
     flag("paused", paused);
     flag("explorerMenuSet", explorerMenuSet);
+    flag("bubble", bubble);
+    num("bubbleX", bubbleX);
+    num("bubbleY", bubbleY);
     j += "  \"welcomed\": "; j += welcomed ? "true" : "false"; j += "\n}\n";
     EnsureDir(DataDir());
     WriteAllBytes(JoinPath(DataDir(), L"settings.json"), j.data(), j.size());
@@ -541,6 +544,9 @@ Settings Settings::Load()
     s.paused = ParseBool(j, "paused", s.paused);
     s.welcomed = ParseBool(j, "welcomed", s.welcomed);
     s.explorerMenuSet = ParseBool(j, "explorerMenuSet", s.explorerMenuSet);
+    s.bubble = ParseBool(j, "bubble", s.bubble);
+    s.bubbleX = ParseInt(j, "bubbleX", s.bubbleX);
+    s.bubbleY = ParseInt(j, "bubbleY", s.bubbleY);
     return s;
 }
 

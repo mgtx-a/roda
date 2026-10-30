@@ -40,7 +40,7 @@ compile() {
   local target="$1" dir="$2" src="$3"
   local obj="$dir/$(echo "$src" | tr '/.' '__').o"
   [ "$obj" -nt "$src" ] && [ "$obj" -nt build.sh ] && { echo "$obj"; return; }
-  # Small code everywhere: the exe must stay under 2 MB.
+  # Small code everywhere: the exe must stay under 2.2 MB.
   local opt=-Os
   case "$src" in
     *.c)   "$ZIG" cc  $opt -ffunction-sections -fdata-sections -std=c11   -target "$target" $INCLUDES $DEFS -w -c "$src" -o "$obj" ;;

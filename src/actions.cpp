@@ -137,13 +137,19 @@ void OpenTerminal(const std::vector<wstring>& paths, Cards& cards)
     else cards.Note(L"Terminal", L"Could not open a terminal in " + dir, true);
 }
 
+bool ExplorerInFront()
+{
+    wstring cls = ClassOf(GetForegroundWindow());
+    return cls == L"Progman" || cls == L"WorkerW" || cls == L"CabinetWClass" || cls == L"ExploreWClass";
+}
+
 std::vector<wstring> ExplorerSelection()
 {
     std::vector<wstring> out;
     HWND fg = GetForegroundWindow();
     wstring cls = ClassOf(fg);
     bool desktop = cls == L"Progman" || cls == L"WorkerW";
-    if (!desktop && cls != L"CabinetWClass" && cls != L"ExploreWClass") return out;
+    if (!ExplorerInFront()) return out;
 
     Com<IShellWindows> windows;
     if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_ALL, IID_PPV_ARGS(windows.Put())))) return out;

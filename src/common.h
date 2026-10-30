@@ -124,6 +124,8 @@ struct Settings {
     bool paused = false;
     bool welcomed = false;
     bool explorerMenuSet = false;             // the Explorer entries were switched on once (the default); now they're the user's to switch off
+    bool bubble = true;                       // the floating button
+    int bubbleX = -100000, bubbleY = -100000; // its centre (screen pixels) where it was left; off every screen until it's placed
     static Settings Load();
     void Save() const;
 };

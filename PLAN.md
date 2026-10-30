@@ -26,7 +26,7 @@ This document is the full brief. Read it all before writing code, then work phas
    no Electron, no Qt, no .NET. Targets:
    - idle memory (private working set) under 5 MB,
    - idle CPU 0% (no polling when nothing is happening),
-   - core exe under 2 MB; full portable folder under ~30 MB.
+   - core exe under 2.2 MB; full portable folder under ~30 MB.
 4. **Offline and private.** No network code at all: no telemetry, no update checks, no
    uploads. The README must say so and list exactly what the app touches (section 12).
 5. **Never destroys data.** Never overwrites or deletes the source file. Output goes next

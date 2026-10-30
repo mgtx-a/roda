@@ -1,5 +1,6 @@
 #include "popup.h"
 
+#include "dragdrop.h"
 #include "ui.h"
 
 namespace rd {
@@ -10,6 +11,8 @@ constexpr double kPad = 24;            // room for the shadow around the card
 constexpr double kHandle = 9;          // crop handles: how close counts
 constexpr double kBtnW = 92, kBtnH = 30;
 constexpr double kListTop = 50;        // Merge: where the list of files starts, below the title
+constexpr double kAddW = 100;          // Merge: the Add files… button
+constexpr double kDropH = 30;          // Merge: the place below the rows to drop more on
 constexpr double kStripTop = 50;       // Remove pages: the strip of pages, below the title
 constexpr double kThumbH = 168, kGap = 14, kNumH = 24, kBarH = 14;   // a page's height, between pages, its label, the scroll bar
 const wchar_t* kAspects[] = { L"Free", L"1:1", L"4:3", L"16:9" };
@@ -19,8 +22,46 @@ bool In(double x, double y, double l, double t, double w, double h) { return x >
 
 }  // namespace
 
+/// Merge's basket: files dragged in from Explorer join the list. Copy is all it ever answers, so the
+/// files stay where they are.
+class PopupDropTarget : public DropTarget {
+public:
+    OptionsPopup* popup = nullptr;
+    STDMETHODIMP DragEnter(IDataObject* data, DWORD, POINTL, DWORD* effect) override
+    {
+        ok_ = popup && popup->shown_ && popup->kind_ == Popup::Order && HasFilesOnDisk(data);
+        if (ok_) { popup->dropHover_ = true; popup->dirty_ = true; RequestFrame(); }
+        *effect = ok_ ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    STDMETHODIMP DragOver(DWORD, POINTL, DWORD* effect) override
+    {
+        *effect = ok_ ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    STDMETHODIMP DragLeave() override
+    {
+        if (popup) { popup->dropHover_ = false; popup->dirty_ = true; RequestFrame(); }
+        return S_OK;
+    }
+    STDMETHODIMP Drop(IDataObject* data, DWORD, POINTL, DWORD* effect) override
+    {
+        std::vector<wstring> paths;
+        if (ok_ && popup && ReadDroppedPaths(data, paths)) popup->AddFiles(paths);
+        DragLeave();
+        *effect = ok_ ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+        return S_OK;
+    }
+private:
+    bool ok_ = false;
+};
+
 OptionsPopup::OptionsPopup() {}
-OptionsPopup::~OptionsPopup() { if (hwnd_) DestroyWindow(hwnd_); }
+OptionsPopup::~OptionsPopup()
+{
+    if (hwnd_) { RevokeDragDrop(hwnd_); DestroyWindow(hwnd_); }
+    if (drop_) { drop_->popup = nullptr; drop_->Release(); }
+}
 
 bool OptionsPopup::Create(HINSTANCE inst)
 {
@@ -32,7 +73,11 @@ bool OptionsPopup::Create(HINSTANCE inst)
     RegisterClassW(&wc);
     hwnd_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW, wc.lpszClassName, L"Roda options", WS_POPUP,
                             -10000, -10000, 1, 1, nullptr, nullptr, inst, this);
-    return hwnd_ != nullptr;
+    if (!hwnd_) return false;
+    drop_ = new PopupDropTarget();
+    drop_->popup = this;
+    if (FAILED(RegisterDragDrop(hwnd_, drop_))) Log(L"popup: could not take dropped files");
+    return true;
 }
 
 LRESULT CALLBACK OptionsPopup::WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -77,8 +122,9 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
         h_ = origH * k + 46 + 12 + 30 + 18 + whereH_;
         w_ = std::max(w_, 380.0);
     } else if (kind == Popup::Order) {
-        w_ = 400;
-        h_ = kListTop + names_.size() * RowH() + 10 + kBtnH + 16 + whereH_;
+        w_ = 420;
+        whereH_ = 22;   // the line where the result goes, kept even while the basket is empty
+        h_ = kListTop + OrderListH() + 10 + kBtnH + 16 + whereH_;
     } else if (kind == Popup::Pages) {
         // About five pages across; the button's words grow with the count ("Remove 12 pages").
         w_ = 640;
@@ -91,7 +137,7 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
         w_ = 320;
         h_ = 172 + (kind == Popup::Size ? FieldsTop() : 0) + whereH_;
     }
-    w_ = std::max(w_, applyW_ + kBtnW + 48);
+    w_ = std::max(w_, applyW_ + kBtnW + 48 + (kind == Popup::Order ? kAddW + 8 : 0));   // Merge: Add files… on the left
     int pw = int(std::lround((w_ + 2 * kPad) * scale_)), ph = int(std::lround((h_ + 2 * kPad) * scale_));
     Mon mon = MonitorOf(at);
     int x = std::clamp<int>(at.x - pw / 2, mon.work.left, std::max<int>(mon.work.left, mon.work.right - pw));
@@ -127,14 +173,60 @@ double OptionsPopup::CancelX() const
     return w_ - 20 - kBtnW - (sizeFields_ ? applyW_ + 8 : 0);
 }
 
-void OptionsPopup::ShowOrder(const wstring& title, const std::vector<wstring>& names, POINT at)
+void OptionsPopup::ShowOrder(const std::vector<wstring>& paths, POINT at)
 {
     // shortcut: no scrolling; past about 16 files the rows get cramped. Add a scrolling list when merges that big turn up.
-    names_ = names;
-    order_.clear();
-    for (size_t i = 0; i < names.size(); i++) order_.push_back(i);
+    items_.clear();
+    orderNote_.clear();
     selected_ = 0;
-    Show(Popup::Order, title, at, 0);
+    hoverRow_ = -1;
+    dropHover_ = false;
+    for (auto& p : paths) if (std::find(items_.begin(), items_.end(), p) == items_.end()) items_.push_back(p);
+    Show(Popup::Order, L"Merge into one PDF", at, 0);
+}
+
+double OptionsPopup::OrderListH() const
+{
+    // Empty: a big place to drop files on. Else the rows, and a slim one below for more.
+    return items_.empty() ? 3 * 34.0 : items_.size() * RowH() + 4 + kDropH;
+}
+
+void OptionsPopup::Relayout()
+{
+    h_ = kListTop + OrderListH() + 10 + kBtnH + 16 + whereH_;
+    int pw = int(std::lround((w_ + 2 * kPad) * scale_)), ph = int(std::lround((h_ + 2 * kPad) * scale_));
+    // It grows downwards from where it is, moving up only as far as the screen's bottom needs.
+    Mon mon = MonitorOf({ frame_.left + pw / 2, frame_.top + kPad });
+    int y = std::max<int>(mon.work.top, std::min<int>(frame_.top, mon.work.bottom - ph));
+    frame_ = { frame_.left, y, frame_.left + pw, y + ph };
+    surf_.Resize(pw, ph);
+    SetWindowPos(hwnd_, nullptr, frame_.left, y, pw, ph, SWP_NOZORDER | SWP_NOACTIVATE);
+    dirty_ = true;
+    RequestFrame();
+}
+
+void OptionsPopup::RemoveRow(int row)
+{
+    if (row < 0 || row >= int(items_.size())) return;
+    items_.erase(items_.begin() + row);
+    selected_ = std::clamp(selected_, 0, std::max(0, int(items_.size()) - 1));
+    hoverRow_ = -1;
+    orderNote_.clear();
+    Relayout();
+}
+
+void OptionsPopup::AddFiles(const std::vector<wstring>& paths)
+{
+    if (!shown_ || kind_ != Popup::Order) return;
+    size_t before = items_.size(), skipped = 0;
+    for (auto& p : paths) {
+        if ((Bit(KindOfPath(p)) & (kImages | Bit(Kind::Pdf))) == 0) { skipped++; continue; }   // only these merge
+        if (std::find(items_.begin(), items_.end(), p) == items_.end()) items_.push_back(p);
+    }
+    orderNote_ = skipped ? (skipped == 1 ? L"1 file left out: only PDFs and pictures merge" : std::to_wstring(skipped) + L" files left out: only PDFs and pictures merge") : L"";
+    if (items_.size() > before) selected_ = int(items_.size()) - 1;
+    Log(L"popup: merge basket has %d file(s)", int(items_.size()));
+    Relayout();
 }
 
 void OptionsPopup::ShowPages(const wstring& title, POINT at)
@@ -218,11 +310,11 @@ void OptionsPopup::TogglePage(int page)
 /// Merge: the picked row goes to row `to`, the rows between shift up or down.
 void OptionsPopup::MoveRow(int to)
 {
-    to = std::clamp(to, 0, int(order_.size()) - 1);
-    if (to == selected_) return;
-    size_t moving = order_[size_t(selected_)];
-    order_.erase(order_.begin() + selected_);
-    order_.insert(order_.begin() + to, moving);
+    to = std::clamp(to, 0, int(items_.size()) - 1);
+    if (to == selected_ || selected_ < 0 || selected_ >= int(items_.size())) return;
+    wstring moving = items_[size_t(selected_)];
+    items_.erase(items_.begin() + selected_);
+    items_.insert(items_.begin() + to, moving);
     selected_ = to;
 }
 
@@ -268,9 +360,13 @@ OptionsPopup::Part OptionsPopup::HitTest(double x, double y, int* aspect) const
             return Part::Strip;   // between pages: still drags the strip
         }
     }
-    if (kind_ == Popup::Order && In(x, y, L + 20, T + kListTop, w_ - 40, order_.size() * RowH())) {
-        *aspect = int((y - T - kListTop) / RowH());
-        return Part::Row;
+    if (kind_ == Popup::Order) {
+        if (In(x, y, L + 20, by, kAddW, kBtnH)) return Part::AddFiles;
+        if (In(x, y, L + 20, T + kListTop, w_ - 40, items_.size() * RowH())) {
+            *aspect = int((y - T - kListTop) / RowH());
+            // The cross left of the grip takes the file out; the rest of the row drags it.
+            return In(x, y, L + w_ - 20 - 62, T + kListTop, 26, items_.size() * RowH()) ? Part::RowRemove : Part::Row;
+        }
     }
     if ((kind_ == Popup::Size && sizeFields_) || kind_ == Popup::Trim) {
         double fy = kind_ == Popup::Size ? FieldsTop() : 0;
@@ -423,9 +519,10 @@ void OptionsPopup::Apply()
         int w = std::max(1, int(std::lround(cw_ * origW_))), h = std::max(1, int(std::lround(ch_ * origH_)));
         opts.Set(L"crop", std::to_wstring(x) + L"," + std::to_wstring(y) + L"," + std::to_wstring(w) + L"," + std::to_wstring(h));
     } else if (kind_ == Popup::Order) {
-        wstring order;
-        for (size_t i : order_) order += (order.empty() ? L"" : L",") + std::to_wstring(i);
-        opts.Set(L"order", order);
+        if (items_.size() < 2) { MessageBeep(MB_OK); return; }   // one file is no merge
+        Json files = Json::Array();
+        for (auto& p : items_) files.Push(Json(p));
+        opts.Set(L"files", files);
     }
     auto fn = onApply;
     Hide();
@@ -456,6 +553,8 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 SetCapture(hwnd_);
                 return 0;
             }
+            if (p == Part::RowRemove) { RemoveRow(a); return 0; }
+            if (p == Part::AddFiles) return 0;   // on the button's release, like the others
             if (p == Part::Row) selected_ = a;
             if (p == Part::ScrollBar) { drag_ = p; SetCapture(hwnd_); Drag(x, y); return 0; }
             if (p == Part::Slider || p == Part::Row || (p >= Part::CropMove && p <= Part::CropSW)) {
@@ -481,11 +580,12 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             if (drag_ != Part::None) { Drag(x, y); dirty_ = true; RequestFrame(); return 0; }
             int a = -1;
             Part p = HitTest(x, y, &a);
-            int preset = p == Part::Preset ? a : -1, page = p == Part::Page ? a : -1;
-            if (p != hover_ || preset != hoverPreset_ || page != hoverPage_) {
+            int preset = p == Part::Preset ? a : -1, page = p == Part::Page ? a : -1, row = p == Part::Row || p == Part::RowRemove ? a : -1;
+            if (p != hover_ || preset != hoverPreset_ || page != hoverPage_ || row != hoverRow_) {
                 hover_ = p;
                 hoverPreset_ = preset;
                 hoverPage_ = page;
+                hoverRow_ = row;
                 if (page >= 0) pageKeys_ = false;   // the mouse is back: its page is the one marked
                 dirty_ = true;
                 RequestFrame();
@@ -514,9 +614,9 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             Part p = HitTest(x, y, &a);
             if (p == Part::Apply) Apply();
             else if (p == Part::Cancel) { Log(L"popup: cancelled"); Hide(); }
+            else if (p == Part::AddFiles && onAddFiles) onAddFiles();
             return 0;
-        }
-        case WM_SETCURSOR: {
+        }        case WM_SETCURSOR: {
             LPCWSTR c = IDC_ARROW;
             switch (hover_) {
                 case Part::CropMove: c = IDC_SIZEALL; break;
@@ -528,6 +628,7 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 case Part::Apply: case Part::Cancel: case Part::Aspect: case Part::Slider: case Part::Preset: case Part::Page: c = IDC_HAND; break;
                 case Part::ScrollBar: case Part::Strip: c = IDC_SIZEWE; break;
                 case Part::Row: c = IDC_HAND; break;   // a hand: take hold of the file and move it
+                case Part::RowRemove: case Part::AddFiles: c = IDC_HAND; break;
                 default: break;
             }
             SetCursor(LoadCursorW(nullptr, c));
@@ -542,8 +643,9 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 // Arrows pick a row; with Alt or Ctrl they move it.
                 int to = selected_ + (w == VK_UP ? -1 : 1);
                 if (m == WM_SYSKEYDOWN || (GetKeyState(VK_CONTROL) & 0x8000)) MoveRow(to);
-                else selected_ = std::clamp(to, 0, int(order_.size()) - 1);
+                else selected_ = std::clamp(to, 0, std::max(0, int(items_.size()) - 1));
             }
+            if (kind_ == Popup::Order && w == VK_DELETE) RemoveRow(selected_);
             if (kind_ == Popup::Pages && pages_ > 0) {
                 // Arrows walk the pages; Delete or Space removes the one they're on (or brings it back).
                 int to = w == VK_LEFT ? focusPage_ - 1 : w == VK_RIGHT ? focusPage_ + 1 : w == VK_HOME ? 0 : w == VK_END ? pages_ - 1 : -1;
@@ -596,8 +698,8 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             }
             return 0;
         case WM_ACTIVATE:
-            // Clicking elsewhere cancels, like a menu.
-            if (LOWORD(w) == WA_INACTIVE && shown_ && drag_ == Part::None) { Log(L"popup: closed (clicked elsewhere)"); Hide(); }
+            // Clicking elsewhere cancels, like a menu; but Merge's basket stays while files are picked in Explorer.
+            if (LOWORD(w) == WA_INACTIVE && shown_ && drag_ == Part::None && kind_ != Popup::Order) { Log(L"popup: closed (clicked elsewhere)"); Hide(); }
             return 0;
         case WM_MOVE: GetWindowRect(hwnd_, &frame_); return 0;
         case WM_DPICHANGED: return 0;
@@ -613,6 +715,12 @@ void OptionsPopup::Draw()
     if (!rt) return;
     const Theme& th = CurrentTheme();
     float L = float(kPad), T = float(kPad), W = float(w_), H = float(h_);
+    if (kind_ == Popup::Order) {
+        // The title counts the files; the line above the buttons says where the PDF goes (the first file
+        // decides), or why some dropped files were left out.
+        title_ = items_.size() < 2 ? L"Merge into one PDF" : L"Merge " + std::to_wstring(items_.size()) + L" files into one PDF";
+        where_ = !orderNote_.empty() ? orderNote_ : items_.empty() || !whereFor ? L"Add at least two files" : whereFor(items_[0]);
+    }
     surf_.DrawShadow(RectF(L, T, W, H), 16, 22, 0, 8, th.shadow);
     rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(L, T, W, H), 16, 16), surf_.Solid(th.glass | 0xFF000000));
     rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(L + 0.5, T + 0.5, W - 1, H - 1), 15.5f, 15.5f), surf_.Solid(th.edge), 1);
@@ -631,12 +739,13 @@ void OptionsPopup::Draw()
     wstring applyText = apply_.empty() ? verb : apply_;
     if (kind_ == Popup::Pages)   // the button counts what it will do
         applyText = removed_.empty() ? L"Remove pages" : L"Remove " + std::to_wstring(removed_.size()) + (removed_.size() == 1 ? L" page" : L" pages");
-    if (sizeFields_) button(L + W - 20 - float(applyW_), by, float(applyW_), applyText.c_str(), true, hover_ == Part::Apply);
+    bool can = kind_ != Popup::Order || items_.size() >= 2;   // Merge needs two files: till then the button rests
+    if (sizeFields_) button(L + W - 20 - float(applyW_), by, float(applyW_), applyText.c_str(), can, can && hover_ == Part::Apply);
     button(L + float(CancelX()), by, float(kBtnW), L"Cancel", false, hover_ == Part::Cancel);
     if (!where_.empty()) {
         // Where the result goes, so nobody has to hunt for it afterwards.
         wstring w = Ellipsize(surf_, where_, 11, DWRITE_FONT_WEIGHT_NORMAL, W - 40);
-        surf_.DrawText(w.c_str(), 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by - 22, W - 40, 16), th.dim);
+        surf_.DrawText(w.c_str(), 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by - 22, W - 40, 16), kind_ == Popup::Order && !orderNote_.empty() ? th.error : th.dim);
     }
     if (kind_ == Popup::Size && !sizeFields_) {
         surf_.DrawText(L"Tab or arrows to pick, Enter to resize", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, T + 84, W - 40, 16), th.dim);
@@ -764,27 +873,52 @@ void OptionsPopup::Draw()
         surf_.DrawText(hint.c_str(), 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by + 8, float(CancelX()) - 28, 16),
                        int(removed_.size()) >= pages_ && pages_ > 0 ? th.error : th.dim);
     } else if (kind_ == Popup::Order) {
-        if (whereFor && !order_.empty()) where_ = whereFor(order_[0]);   // the first file decides the folder
-        // The files top to bottom, in the order their pages will come: number, name, and a grip to drag by.
+        // The files top to bottom, in the order their pages will come: number, name, a cross to take it out
+        // (on the row under the pointer), and a grip to drag by. Below them, the place to drop more.
         float rh = float(RowH()), y0 = T + float(kListTop);
-        for (size_t i = 0; i < order_.size(); i++) {
+        for (size_t i = 0; i < items_.size(); i++) {
             float y = y0 + float(i) * rh;
-            bool picked = int(i) == selected_;
+            bool picked = int(i) == selected_, hot = int(i) == hoverRow_;
             rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(L + 20, y + 1, W - 40, rh - 3), 7, 7),
                                      surf_.Solid(picked ? WithAlpha(th.accent, 0.18) : th.button));
             if (picked) rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(L + 20.75, y + 1.75, W - 41.5f, rh - 4.5f), 6.5f, 6.5f), surf_.Solid(th.accent), 1.5f);
             float ty = y + (rh - 18) / 2;
             wstring n = std::to_wstring(i + 1);
             surf_.DrawText(n.c_str(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(L + 32, ty, 22, 18), picked ? th.accent : th.dim);
-            wstring name = Ellipsize(surf_, names_[order_[i]], 12.5f, DWRITE_FONT_WEIGHT_NORMAL, W - 40 - 34 - 34);
-            surf_.DrawText(name.c_str(), 12.5f, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 56, ty, W - 40 - 34 - 34, 18), th.text);
+            wstring name = Ellipsize(surf_, FileName(items_[i]), 12.5f, DWRITE_FONT_WEIGHT_NORMAL, W - 40 - 34 - 64);
+            surf_.DrawText(name.c_str(), 12.5f, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 56, ty, W - 40 - 34 - 64, 18), th.text);
+            if (hot) {   // the cross
+                bool onX = hover_ == Part::RowRemove;
+                D2D1_POINT_2F c = D2D1::Point2F(L + W - 20 - 49, y + rh / 2);
+                if (onX) rt->FillEllipse(D2D1::Ellipse(c, 10, 10), surf_.Solid(WithAlpha(th.error, 0.18)));
+                auto ink = surf_.Solid(onX ? th.error : th.dim);
+                rt->DrawLine(D2D1::Point2F(c.x - 4, c.y - 4), D2D1::Point2F(c.x + 4, c.y + 4), ink, 1.5f);
+                rt->DrawLine(D2D1::Point2F(c.x + 4, c.y - 4), D2D1::Point2F(c.x - 4, c.y + 4), ink, 1.5f);
+            }
             for (int k = 0; k < 3; k++)   // the grip: three short lines
                 rt->DrawLine(D2D1::Point2F(L + W - 42, y + rh / 2 - 4 + k * 4), D2D1::Point2F(L + W - 30, y + rh / 2 - 4 + k * 4), surf_.Solid(th.dim), 1.2f);
         }
-        // The hint beside the title, clear of the buttons whatever their words make them.
-        const wchar_t* hint = L"Drag to reorder, or Alt+↑↓";
-        float hw = surf_.MeasureText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL);
-        surf_.DrawText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + W - 20 - hw, T + 19, hw + 4, 16), th.dim);
+        // Where to drop: the whole list while it's empty, a strip below the rows after. It lights up under a drag.
+        float dy = y0 + float(items_.size()) * rh + (items_.empty() ? 0 : 4), dh = float(items_.empty() ? 3 * 34 - 4 : kDropH);
+        D2D1_RECT_F zone = RectF(L + 20, dy, W - 40, dh);
+        rt->FillRoundedRectangle(D2D1::RoundedRect(zone, 8, 8), surf_.Solid(dropHover_ ? WithAlpha(th.accent, 0.16) : WithAlpha(th.button, 0.5)));
+        rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(L + 20.75f, dy + 0.75f, W - 41.5f, dh - 1.5f), 7.5f, 7.5f),
+                                 surf_.Solid(dropHover_ ? th.accent : th.sep), dropHover_ ? 1.5f : 1);
+        const wchar_t* say = items_.empty() ? L"Drop PDFs or pictures here" : L"Drop more here";
+        float sw2 = surf_.MeasureText(say, 12, DWRITE_FONT_WEIGHT_NORMAL);
+        surf_.DrawText(say, 12, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + (W - sw2) / 2, dy + (items_.empty() ? dh / 2 - 18 : dh / 2 - 9), sw2 + 4, 18),
+                       dropHover_ ? th.accent : th.dim);
+        if (items_.empty()) {
+            const wchar_t* sub = L"from Explorer, as many times as you like";
+            float bw = surf_.MeasureText(sub, 11, DWRITE_FONT_WEIGHT_NORMAL);
+            surf_.DrawText(sub, 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + (W - bw) / 2, dy + dh / 2 + 2, bw + 4, 16), th.dim);
+        }
+        button(L + 20, by, float(kAddW), L"Add files…", false, hover_ == Part::AddFiles);
+        if (items_.size() > 1) {   // the hint beside the title, clear of the buttons whatever their words make them
+            const wchar_t* hint = L"Drag to reorder, or Alt+↑↓";
+            float hw = surf_.MeasureText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL);
+            surf_.DrawText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + W - 20 - hw, T + 19, hw + 4, 16), th.dim);
+        }
     } else if (kind_ == Popup::Crop) {
         wstring dims = std::to_wstring(int(std::lround(cw_ * origW_))) + L" × " + std::to_wstring(int(std::lround(ch_ * origH_)));
         float dw = surf_.MeasureText(dims.c_str(), 12, DWRITE_FONT_WEIGHT_NORMAL);

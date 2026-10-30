@@ -14,7 +14,7 @@ Works on Windows 10 and 11. No installing, no admin rights, no account.
 There are two versions:
 
 - **Full** (a zip, about 23 MB once unzipped): does everything, including PDFs, audio and video.
-- **Lite** (one file, under 2 MB): everything except PDFs, audio and video.
+- **Lite** (one file, under 2.2 MB): everything except PDFs, audio and video.
 
 Unzip it anywhere you like, even a USB stick, and double-click `Roda.exe`. To remove Roda, just delete
 the folder.
@@ -55,11 +55,24 @@ Space is safe: if the wheel doesn't open, the file just drops back where it was.
 still open the Convert, Tools and Files wheels too, but Windows also uses them while you drag: a drop
 with Ctrl held makes a copy, with Shift a move, with Alt a shortcut.)
 
+### The floating button
+A small round Roda button floats at the side of the screen, half see-through until the pointer comes.
+- **Drop files on it:** the wheel opens there with their choices. Click one.
+- **Click it:** the wheel opens empty and waits for files to be dragged onto it.
+- **Drag it** anywhere: let go and it settles against the nearer side. It stays where you leave it.
+- **Right-click it** for Roda's menu. **Floating button** there switches it off (and on again from the
+  wheel icon near the clock).
+
+It steps aside while a game or a full-screen video is in front.
+
 ### Other ways to open the wheel
 - **Right-click:** select files and right-click them, then choose **Roda…**. On Windows 11, hold
   **Shift** while you right-click (or choose *Show more options*). You can turn it off in Settings.
 - **Keyboard:** select files in File Explorer and press **Ctrl+Alt+R**. Use the arrow keys to choose,
   **Tab** for the next wheel, **Enter** to go, **Esc** to cancel. You can also click the wheel's names.
+- **Wheel first, files after:** press **Ctrl+Alt+R** (or **Ctrl+Alt+M**) with nothing selected. An empty
+  wheel waits at the pointer: drag files onto it and it fills with their choices. Drop on one, or drop
+  anywhere on the wheel and click a choice after. Click its centre to close it.
 - **Without dragging at all:** right-click the wheel icon near the clock and choose **Choose files…**.
   Pick your files, and the wheel opens for them. Click a choice, or a wheel's name to switch.
 - **From a ZIP or an Outlook email:** drag a file straight out of an open ZIP folder or an email.
@@ -72,6 +85,10 @@ Select two or more PDFs or pictures, then either press **Ctrl+Alt+M**, or right-
 **Merge into one PDF** (on Windows 11, Shift + right-click). A list of the files opens: drag them
 into the order you want (or pick one and press **Alt+↑/↓**), then click **Merge**. The new PDF is saved
 next to the first file.
+
+Nothing selected? Press **Ctrl+Alt+M** anyway: the wheel waits for you to drag the PDFs onto it, then
+offers **Merge PDF** (see above). In the list, drag more files in or click **Add files…**; the **✕**
+on a row takes that file out again. The list stays open while you look in Explorer.
 
 ### Tips
 - Press **Space** **after** you start dragging, not before.

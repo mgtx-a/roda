@@ -12,6 +12,8 @@
 
 namespace rd {
 
+class PopupDropTarget;
+
 class OptionsPopup {
 public:
     OptionsPopup();
@@ -25,10 +27,14 @@ public:
     void SetPresets(std::vector<Preset> presets, bool fields);
     /// Before Show: the main button's words ("Resize 3 pictures") and where results go. Cleared on Hide.
     void SetSummary(const wstring& apply, const wstring& where);
-    /// Merge: where the result goes when file `first` (an index into the names) comes first. Cleared on Hide.
-    std::function<wstring(size_t first)> whereFor;
-    /// Merge: the files in a list to put in order; applies with "order", the new order as indexes ("2,0,1").
-    void ShowOrder(const wstring& title, const std::vector<wstring>& names, POINT at);
+    /// Merge: where the result goes when `first` comes first. Cleared on Hide.
+    std::function<wstring(const wstring& first)> whereFor;
+    /// Merge: the files in a list to put in order, and a basket: more can be dropped on it from Explorer
+    /// or added with Add files… (onAddFiles), and taken out. It may start empty. Applies with "files",
+    /// the paths in order; it stays open while other windows are used, until Merge, Cancel or Esc.
+    void ShowOrder(const std::vector<wstring>& paths, POINT at);
+    std::function<void()> onAddFiles;
+    void AddFiles(const std::vector<wstring>& paths);   // PDFs and pictures only; the same file once
     /// Remove pages: the PDF's pages side by side to click away; applies with "pages" ("2, 5-7").
     /// Pictures of the pages are asked for as they scroll into view: onNeedPage(token, page), answered
     /// by SetPage (token says which showing it was for; a late answer to an old one is dropped).
@@ -47,7 +53,8 @@ public:
 
 private:
     enum class Part { None, Slider, Width, Height, Apply, Cancel, CropMove, CropN, CropS, CropE, CropW, CropNE, CropNW, CropSE, CropSW, Aspect, Row, Preset,
-                      Page, Strip, ScrollBar };
+                      Page, Strip, ScrollBar, RowRemove, AddFiles };
+    friend class PopupDropTarget;
     static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l);
     LRESULT Handle(UINT m, WPARAM w, LPARAM l);
     Part HitTest(double x, double y, int* aspect) const;
@@ -56,10 +63,13 @@ private:
     void Drag(double x, double y);
     void SetAspect(int i);
     void MoveRow(int to);
+    void RemoveRow(int row);                 // Merge: the file leaves the basket
     D2D1_RECT_F PictureRect() const;
     double CancelX() const;               // DIPs from the card's left
     double FieldsTop() const { return presets_.empty() ? 0 : 44; }
-    double RowH() const { return std::clamp(360.0 / std::max<size_t>(1, names_.size()), 22.0, 34.0); }
+    double RowH() const { return std::clamp(360.0 / std::max<size_t>(1, items_.size()), 22.0, 34.0); }
+    double OrderListH() const;               // Merge: the rows, and the place to drop more below them
+    void Relayout();                         // Merge: the card's height follows its rows
     // Remove pages: the strip of pages, DIPs.
     double PageW() const;                    // one page's slot (the first page's shape)
     double MaxScroll() const;
@@ -85,9 +95,12 @@ private:
     int origW_ = 0, origH_ = 0;
     double cx_ = 0, cy_ = 0, cw_ = 1, ch_ = 1;   // crop, 0..1 of the picture
     int aspect_ = 0;                         // 0 free, 1 1:1, 2 4:3, 3 16:9
-    std::vector<wstring> names_;             // Merge: the files, as given
-    std::vector<size_t> order_;              // Merge: indexes into names_, top to bottom
+    std::vector<wstring> items_;             // Merge: the files, top to bottom
     int selected_ = 0;                       // Merge: the row picked (by click or arrows)
+    int hoverRow_ = -1;
+    bool dropHover_ = false;                 // Merge: files being dragged over the card
+    wstring orderNote_;                      // Merge: why dropped files weren't taken
+    PopupDropTarget* drop_ = nullptr;
     std::vector<Preset> presets_;
     std::vector<std::pair<double, double>> presetX_;   // left and width of each, DIPs from the card's left
     bool sizeFields_ = true;

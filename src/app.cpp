@@ -4,6 +4,7 @@
 #include "anim.h"
 #include "cards.h"
 #include "dragdrop.h"
+#include "bubble.h"
 #include "floatcard.h"
 #include "gfx.h"
 #include "input.h"
@@ -30,7 +31,7 @@ constexpr UINT_PTR TIMER_MODAL = 99;
 constexpr int HOTKEY_WHEEL = 1;
 constexpr int HOTKEY_MERGE = 2;   // Ctrl+Alt+M: the files selected in Explorer, merged into one PDF
 
-enum Cmd { CmdOutput = 1, CmdPause, CmdStartup, CmdSettings, CmdTour, CmdLog, CmdQuit, CmdChoose, CmdRecent = 100 };   // CmdRecent: 4 per entry
+enum Cmd { CmdOutput = 1, CmdPause, CmdStartup, CmdSettings, CmdTour, CmdLog, CmdQuit, CmdChoose, CmdBubble, CmdRecent = 100 };   // CmdRecent: 4 per entry
 
 HWND g_msg = nullptr;
 std::mutex g_uiMutex;
@@ -138,6 +139,7 @@ struct App {
     Tour tour;
     int choices = 0;   // options chosen so far (the tour watches it)
     std::vector<std::unique_ptr<FloatCard>> floats;
+    std::unique_ptr<Bubble> bubble;    // the floating button, while it's switched on
     std::map<int, std::function<void(const JobState&)>> waiting;   // quiet jobs (previews): who wants the result
     struct Finished { wstring title, what, out, error; bool ok = false; };
     std::vector<Finished> recent;    // the tray's Recent menu, newest first: results outlive their card
@@ -202,13 +204,45 @@ struct App {
 
         taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
         SetUpTray();
+        if (settings.bubble && !TestMode()) SetBubble(true);
         if (TestMode()) WatchMemory();
         return true;
+    }
+
+    /// The floating button on or off (remembered).
+    void SetBubble(bool on)
+    {
+        if (on && !bubble) {
+            auto b = std::make_unique<Bubble>();
+            b->onClick = [this](POINT c) { if (!settings.paused && !wheel.open()) wheel.ShowWaiting(&c); };
+            b->onDrop = [this](const std::vector<wstring>& paths, POINT c) {
+                if (settings.paused) return;
+                if (wheel.open()) wheel.Hide(false);
+                Log(L"bubble: %d file(s) dropped", int(paths.size()));
+                wheel.ShowFor(paths, c);
+            };
+            b->onMenu = [this] { TrayMenu(); };
+            b->onMoved = [this](POINT c) { settings.bubbleX = c.x; settings.bubbleY = c.y; settings.Save(); };
+            if (!b->Create(GetModuleHandleW(nullptr), { settings.bubbleX, settings.bubbleY })) { Log(L"bubble: could not create it"); return; }
+            bubble = std::move(b);
+            WatchFullScreen();
+        } else if (!on) bubble.reset();
+        if (settings.bubble != on) { settings.bubble = on; settings.Save(); }
+        Log(on ? L"bubble: on" : L"bubble: off");
+    }
+
+    /// The floating button steps aside while a game or a full-screen video is in front of it, as the wheel does.
+    void WatchFullScreen()
+    {
+        if (!bubble) return;
+        bubble->Show(!FullScreenAppAt(bubble->centre()));
+        After(1.5, [this] { WatchFullScreen(); });
     }
 
     void Shutdown()
     {
         jobs.CancelAll();
+        bubble.reset();   // its drop target goes before OLE does
         if (hotkey) UnregisterHotKey(g_msg, HOTKEY_WHEEL);
         if (mergeHotkey) UnregisterHotKey(g_msg, HOTKEY_MERGE);
         if (fastTimer) timeEndPeriod(1);
@@ -425,16 +459,10 @@ struct App {
                 return;
             }
             if (opts.has(L"q")) { settings.compressQuality = int(opts[L"q"].Num()); settings.Save(); }
-            // Merge: the files in the order picked ("2,0,1" names them by where they were).
-            std::vector<wstring> ordered;
-            const wstring order = opts.has(L"order") ? opts[L"order"].Str() : L"";
-            for (size_t a = 0, b; a < order.size(); a = b + 1) {
-                b = order.find(L',', a);
-                if (b == wstring::npos) b = order.size();
-                size_t i = size_t(_wtoi(order.substr(a, b - a).c_str()));
-                if (i < paths.size()) ordered.push_back(paths[i]);
-            }
-            Submit(o, ordered.size() == paths.size() ? ordered : paths, opts);
+            // Merge: the files the basket ended with, in its order (some may have been added or taken out).
+            std::vector<wstring> files;
+            if (opts.has(L"files")) for (auto& f : opts[L"files"].arr) files.push_back(f.Str());
+            Submit(o, files.empty() ? paths : files, opts);
         };
         wstring title = paths.size() == 1 ? o.label + L" " + FileName(paths[0]) : o.label + L" " + std::to_wstring(paths.size()) + L" pictures";
         if (c->popup == Popup::Quality) popup.Show(Popup::Quality, L"Compress", at, settings.compressQuality);
@@ -466,10 +494,12 @@ struct App {
         }
         else if (c->popup == Popup::Trim) popup.Show(Popup::Trim, L"Trim " + (paths.size() == 1 ? FileName(paths[0]) : L""), at, 0);
         else if (c->popup == Popup::Order) {
-            std::vector<wstring> names;
-            for (auto& p : paths) names.push_back(FileName(p));
-            popup.whereFor = [this, paths](size_t first) { return WhereText({ paths[first] }, true); };
-            popup.ShowOrder(L"Merge " + std::to_wstring(paths.size()) + L" files into one PDF", names, at);
+            popup.whereFor = [this](const wstring& first) { return WhereText({ first }, true); };
+            popup.onAddFiles = [this, paths] {
+                wstring from = paths.empty() ? L"" : ParentDir(paths[0]);
+                popup.AddFiles(PickFiles(L"Add files to merge", L"Add", from, true));
+            };
+            popup.ShowOrder(paths, at);
         }
         else if (c->popup == Popup::Crop) {
             wstring apply = ApplyLabel(c->popup, paths), where = WhereText(paths, false);
@@ -498,16 +528,22 @@ struct App {
         std::erase_if(paths, [&](const wstring& p) { return (Bit(KindOfPath(p)) & c->inputs) == 0; });
         POINT at = CursorPos();
         cards.AnchorAt(at);
-        if (paths.size() < 2) { cards.Note(L"Merge PDF", L"Select two or more PDFs or pictures to merge into one PDF."); return; }
-        Chosen({ c, c->label, L"", c->icon }, paths, at);
+        Chosen({ c, c->label, L"", c->icon }, paths, at);   // fewer than two: the basket opens to add the rest
     }
 
     void OnMergeHotkey()
     {
         auto paths = ExplorerSelection();
+        if (paths.empty() && ExplorerInFront()) {
+            // Explorer or the desktop, nothing selected: the wheel, waiting for files to be dragged onto it.
+            if (settings.paused || wheel.open() || popup.shown()) return;
+            Log(L"hotkey: merge, nothing selected: the wheel waits for files");
+            wheel.ShowWaiting();
+            return;
+        }
         if (paths.empty()) {
-            // Not Explorer, or nothing selected there: the keys are the app's in front (Word's Ctrl+Alt+M
-            // is a new comment). Let go of them, send them on, and take them back once they've arrived.
+            // Another app in front: the keys are its (Word's Ctrl+Alt+M is a new comment). Let go of them,
+            // send them on, and take them back once they've arrived.
             UnregisterHotKey(g_msg, HOTKEY_MERGE);
             mergeHotkey = false;
             INPUT in[2]{};
@@ -527,9 +563,9 @@ struct App {
     {
         if (settings.paused || wheel.open()) return;
         auto paths = ExplorerSelection();
-        if (paths.empty()) {
-            cards.AnchorAt(CursorPos());
-            cards.Note(L"Nothing selected", L"Select files in Explorer or on the desktop, then press the hotkey.");
+        if (paths.empty()) {   // nothing selected: the wheel waits for files to be dragged onto it
+            Log(L"hotkey: nothing selected, the wheel waits for files");
+            wheel.ShowWaiting();
             return;
         }
         Log(L"hotkey: %d item(s) selected in Explorer", int(paths.size()));
@@ -674,6 +710,7 @@ struct App {
         AppendMenuW(m, MF_STRING | (fixedOutput ? 0 : MF_GRAYED), CmdOutput, fixedOutput ? L"Open output folder" : L"Output: next to each file");
         AppendMenuW(m, MF_STRING | (settings.paused ? MF_CHECKED : 0), CmdPause, L"Pause Roda");
         AppendMenuW(m, MF_STRING | (StartupOn() ? MF_CHECKED : 0), CmdStartup, L"Start with Windows");
+        AppendMenuW(m, MF_STRING | (bubble ? MF_CHECKED : 0), CmdBubble, L"Floating button");
         AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(m, MF_STRING, CmdSettings, L"Settings…");
         AppendMenuW(m, MF_STRING, CmdTour, L"Take the tour");
@@ -703,6 +740,7 @@ struct App {
             case CmdOutput: EnsureDir(settings.outputFolder); ShellExecuteW(nullptr, L"open", settings.outputFolder.c_str(), nullptr, nullptr, SW_SHOWNORMAL); break;
             case CmdPause: SetPaused(!settings.paused); break;
             case CmdStartup: SetStartup(!StartupOn()); break;
+            case CmdBubble: SetBubble(!bubble); break;
             case CmdSettings: settingsUi.Show(); break;
             case CmdTour: StartTour(); break;
             case CmdLog: ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + JoinPath(DataDir(), L"log.txt") + L"\"").c_str(), nullptr, SW_SHOWNORMAL); break;
@@ -716,6 +754,7 @@ struct App {
     {
         if (AnyAnimating() || wheel.dirty() || cards.dirty() || popup.dirty() || settingsUi.dirty() || placeUi.dirty() || tour.dirty() || g_frameWanted) return true;
         for (auto& f : floats) if (f->dirty()) return true;
+        if (bubble && bubble->dirty()) return true;
         return false;
     }
 
@@ -733,6 +772,7 @@ struct App {
         if (placeUi.shown()) placeUi.Draw();
         if (tour.active()) tour.Draw();
         for (auto& f : floats) f->Draw();
+        if (bubble && bubble->shown()) bubble->Draw();
         floats.erase(std::remove_if(floats.begin(), floats.end(), [](auto& f) { return f->closed(); }), floats.end());
     }
 

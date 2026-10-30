@@ -18,6 +18,7 @@ constexpr double kMargin = 30;                      // room around the disc for 
 constexpr double kTabH = 24, kTabGap = 10;        // the Convert · Tools · Files tabs above the disc
 constexpr double kTabRoom = kTabH + kTabGap + 4;
 constexpr int kTabHit = -10;                        // HitTest: kTabHit - i is tab i
+constexpr int kCloseHit = -9;                       // HitTest: the close cross after the tabs
 constexpr int kPerRing = 8;
 constexpr size_t kMagicLimit = 200;                 // beyond this many items, judge by extension (no file reads)
 
@@ -51,6 +52,7 @@ public:
     STDMETHODIMP DragEnter(IDataObject* data, DWORD, POINTL pt, DWORD* effect) override
     {
         hasFiles_ = HasFiles(data);
+        if (hasFiles_ && wheel) wheel->OnDragEnter(data);
         *effect = hasFiles_ && wheel ? wheel->OnDragOver(pt, *effect) : DROPEFFECT_NONE;
         return S_OK;
     }
@@ -164,15 +166,54 @@ LRESULT Wheel::Handle(UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
         case WM_MOUSEACTIVATE: return keyboard_ ? MA_ACTIVATE : MA_NOACTIVATE;
-        case WM_DPICHANGED: return 0;   // the wheel sizes itself for the monitor it opens on
+        case WM_LBUTTONDOWN:
+            // A waiting wheel moves where it's dragged (by anything but its centre, which closes it).
+            if (waiting_ && open() && HitTest(CursorPos()) != -1 && HitTest(CursorPos()) != kCloseHit) {
+                ReleaseCapture();
+                moving_ = true;
+                SendMessageW(hwnd_, WM_NCLBUTTONDOWN, HTCAPTION, 0);   // Windows moves it until the button goes up
+                moving_ = false;
+                GetWindowRect(hwnd_, &frame_);
+                centre_ = { (frame_.left + frame_.right) / 2, (frame_.top + frame_.bottom) / 2 };
+                Fit();   // let go on another screen: its scale, and whole on it
+                Draw();
+                return 0;
+            }
+            break;
+        case WM_SETCURSOR:
+            if (waiting_ && open()) {
+                int h = HitTest(CursorPos());
+                SetCursor(LoadCursorW(nullptr, h == -1 || h == kCloseHit ? IDC_HAND : IDC_SIZEALL));
+                return TRUE;
+            }
+            break;
+        // Dragged onto a screen with another zoom: the window takes the size the wheel needs there, at
+        // once, so it isn't cut off while it's carried. (Otherwise it sizes itself for the screen it opens on.)
+        case WM_GETDPISCALEDSIZE:
+            if (!moving_) return FALSE;
+            reinterpret_cast<SIZE*>(l)->cx = reinterpret_cast<SIZE*>(l)->cy = int(std::lround(sizeDip_ * LOWORD(w) / 96.0));
+            return TRUE;
+        case WM_DPICHANGED:
+            if (moving_ && shown_) {
+                frame_ = *reinterpret_cast<RECT*>(l);
+                centre_ = { (frame_.left + frame_.right) / 2, (frame_.top + frame_.bottom) / 2 };
+                scale_ = LOWORD(w) / 96.0;
+                surf_.SetScale(scale_);
+                surf_.Resize(frame_.right - frame_.left, frame_.bottom - frame_.top);
+                Draw();   // the new size and position go with the picture
+            }
+            return 0;
         case WM_MOUSEMOVE: {
             // Windows sends a move when the wheel appears under the still pointer; that must not steal the
             // keyboard's highlight.
             POINT p = CursorPos();
             if (keyboard_ && open() && (p.x != lastMouse_.x || p.y != lastMouse_.y)) { lastMouse_ = p; SetHot(HitTest(p)); }
+            else if (waiting_ && open()) SetHot(HitTest(p) == kCloseHit ? kCloseHit : -2);   // only the cross lights up
             return 0;
         }
         case WM_LBUTTONUP:
+            if ((waiting_ || keyboard_) && open() && HitTest(CursorPos()) == kCloseHit) { Log(L"wheel: closed (the cross)"); Hide(); return 0; }
+            if (waiting_ && open() && HitTest(CursorPos()) == -1) { Log(L"wheel: closed while waiting for files"); Hide(); return 0; }
             if (keyboard_ && open()) {
                 int h = HitTest(CursorPos());
                 if (h <= kTabHit) { Switch(static_cast<WheelKind>(kTabHit - h)); if (!segs_.empty()) SetHot(0); }
@@ -209,6 +250,7 @@ bool Wheel::Mixed() const
 
 wstring Wheel::CentreText() const
 {
+    if (waiting_) return L"Drop files";   // "here" below it; the centre says Cancel under the pointer
     size_t n = paths_.size();
     if (n == 1 && !kinds_.empty() && kinds_[0] == Kind::Folder) return L"1 folder";
     if (Mixed()) return std::to_wstring(n) + (n == 1 ? L" item" : L" items");
@@ -248,6 +290,7 @@ void Wheel::Show(WheelKind kind, const std::vector<wstring>& paths, double keySe
 {
     if (!hwnd_) return;
     keyboard_ = false;
+    waiting_ = caught_ = false;
     paths_ = paths;
     kinds_.clear();
     // Magic bytes for the first items (so a mislabelled file still gets the right wheel), the name for the rest.
@@ -271,9 +314,62 @@ void Wheel::ShowCatcher(bool on)
     SetWindowPos(catcher_, HWND_TOPMOST, x, y, GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN), SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
+void Wheel::ShowFor(const std::vector<wstring>& paths, POINT at)
+{
+    ShowWaiting(&at);
+    if (!Fill(paths)) { Log(L"wheel: nothing to do with what was dropped"); Hide(); }
+}
+
+void Wheel::ShowWaiting(const POINT* at)
+{
+    if (!hwnd_) return;
+    keyboard_ = false;
+    paths_.clear();
+    kinds_.clear();
+    segs_.clear();
+    more_.clear();
+    for (auto& a : avail_) a = false;
+    kind_ = WheelKind::Tools;
+    waiting_ = true;
+    caught_ = false;
+    invite_.Set(0);
+    if (at) centre_ = *at;
+    Open(-1, at != nullptr);
+}
+
+void Wheel::OnDragEnter(IDataObject*)
+{
+    if (!waiting_ || !open()) return;
+    // Files over the waiting wheel: it dims, swells a little and says where to let go (as a web page's
+    // drop zone does).
+    if (ReducedMotion()) invite_.Set(1); else invite_.Spring(1, 0.22, 0.8);
+    if (!ReducedMotion()) open_.Spring(1.06, 0.25, 0.6);
+    dirty_ = true;
+    RequestFrame();
+}
+
+bool Wheel::Fill(const std::vector<wstring>& paths)
+{
+    // The dropped files' choices, Tools first (as Space opens), around the same centre; then it waits for a click.
+    if (paths.empty()) return false;
+    paths_ = paths;
+    kinds_.clear();
+    for (size_t i = 0; i < paths_.size(); i++) kinds_.push_back(i < kMagicLimit ? KindOfPath(paths_[i]) : KindFromExtension(paths_[i]));
+    for (int i = 0; i < 3; i++) avail_[i] = !OptionsFor(static_cast<WheelKind>(i), kinds_, settings_).empty();
+    kind_ = WheelKind::Tools;
+    if (!Build()) { kind_ = WheelKind::Convert; if (!Build()) { kind_ = WheelKind::Actions; if (!Build()) return false; } }
+    waiting_ = false;
+    caught_ = true;
+    invite_.Set(0);
+    Open(-1, true);   // it pops open again, now with choices
+    StayForClicks();
+    Log(L"wheel: %d file(s) dropped on the waiting wheel; it waits for a click", int(paths_.size()));
+    return true;
+}
+
 void Wheel::StayForClicks()
 {
-    if (!shown_ || closing_ || keyboard_) return;
+    if (!shown_ || closing_ || keyboard_ || waiting_) return;   // still waiting: nothing to click yet, it stays as it is
     // The drag is over, so the catcher can go; the wheel takes clicks now, and a click elsewhere closes it.
     ShowCatcher(false);
     keyboard_ = true;
@@ -310,6 +406,21 @@ void Wheel::Open(double keySeenAt, bool keepCentre)
     keySeenAt_ = keySeenAt;
 
     if (!keepCentre) centre_ = CursorPos();
+    Fit();
+
+    if (ReducedMotion()) { open_.Set(1); fade_.Set(1); }
+    else {
+        open_.Set(0.85); open_.Spring(1, 0.22, 0.78);
+        fade_.Set(0.35); fade_.Ease(1, 0.15, Curve::EaseOut);
+    }
+    pulse_.Set(0);
+    Draw();   // the first frame now, not on the next pass of the loop
+    ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+    Log(L"wheel: %s opened for %s at %.0f%% scale (%d options)", WheelName(kind_), CentreText().c_str(), scale_ * 100, int(segs_.size()));
+}
+
+void Wheel::Fit()
+{
     scale_ = ScaleAt(centre_);
     surf_.SetScale(scale_);
     bool twoRings = segs_.size() > size_t(kPerRing);
@@ -327,17 +438,7 @@ void Wheel::Open(double keySeenAt, bool keepCentre)
     centre_ = c;
     frame_ = { c.x - px / 2, c.y - px / 2, c.x - px / 2 + px, c.y - px / 2 + px };
     surf_.Resize(px, px);
-
-    if (ReducedMotion()) { open_.Set(1); fade_.Set(1); }
-    else {
-        open_.Set(0.85); open_.Spring(1, 0.22, 0.78);
-        fade_.Set(0.35); fade_.Ease(1, 0.15, Curve::EaseOut);
-    }
-    pulse_.Set(0);
     SetWindowPos(hwnd_, HWND_TOPMOST, frame_.left, frame_.top, px, px, SWP_NOACTIVATE);
-    Draw();   // the first frame now, not on the next pass of the loop
-    ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-    Log(L"wheel: %s opened for %s at %.0f%% scale (%d options)", WheelName(kind_), CentreText().c_str(), scale_ * 100, int(segs_.size()));
 }
 
 void Wheel::Switch(WheelKind kind)
@@ -398,11 +499,15 @@ int Wheel::HitTest(POINT p) const
 {
     double k = std::max(0.5, open_.value) * scale_;
     double dx = (p.x - centre_.x) / k, dy = (p.y - centre_.y) / k;
-    for (int i = 0; i < 3; i++) {
-        const auto& t = tabs_[i];
-        if (avail_[i] && dx >= t.left - 3 && dx <= t.right + 3 && dy >= t.top - 3 && dy <= t.bottom + 3) return kTabHit - i;
-    }
     double d = std::sqrt(dx * dx + dy * dy);
+    if (tabR_ > 0) {
+        D2D1_POINT_2F x = Polar(0, 0, tabR_, closeA_);
+        if (std::hypot(dx - x.x, dy - x.y) <= kTabH / 2 + 3) return kCloseHit;
+        double ta = std::atan2(dx, -dy), slack = 3 / tabR_;   // clockwise from the top, -pi..pi
+        if (std::abs(d - tabR_) <= kTabH / 2 + 3)
+            for (int i = 0; i < 3; i++)
+                if (avail_[i] && ta >= tabA_[i][0] - slack && ta <= tabA_[i][1] + slack) return kTabHit - i;
+    }
     if (d < kRing0In) return -1;
     bool twoRings = segs_.size() > size_t(kPerRing);
     int ring;
@@ -458,6 +563,7 @@ void Wheel::Choose(int h)
 DWORD Wheel::OnDragOver(POINTL pt, DWORD allowed)
 {
     if (!shown_ || closing_) return DROPEFFECT_NONE;
+    if (waiting_) return CopyEffect(allowed);   // anywhere on it: the pointer says Copy, the files stay where they are
     int h = HitTest({ pt.x, pt.y });
     // Dragging onto a tab opens that wheel; the drop still has to land on an option.
     if (h <= kTabHit && static_cast<WheelKind>(kTabHit - h) != kind_) Switch(static_cast<WheelKind>(kTabHit - h));
@@ -468,6 +574,13 @@ DWORD Wheel::OnDragOver(POINTL pt, DWORD allowed)
 void Wheel::OnDragLeave()
 {
     SetHot(-2);
+    if (waiting_) {   // the files went elsewhere (or the drag ended): it settles back, still waiting
+        if (ReducedMotion()) invite_.Set(0); else invite_.Spring(0, 0.25, 1.0);
+        if (!ReducedMotion()) open_.Spring(1, 0.25, 0.8);
+        dirty_ = true;
+        RequestFrame();
+        return;
+    }
     // Leaving with the pointer still over the disc means the drag itself ended: Esc, or the source gave up.
     if (shown_ && !closing_ && !dropped_ && HitTest(CursorPos()) != -2) {
         Log(L"wheel: the drag was cancelled");
@@ -478,8 +591,16 @@ void Wheel::OnDragLeave()
 DWORD Wheel::OnDrop(IDataObject* data, POINTL pt, DWORD allowed)
 {
     if (!shown_ || closing_) return DROPEFFECT_NONE;
+    if (waiting_) {
+        // Dropped on the waiting wheel: it takes the files (copied out first from a ZIP or an email).
+        std::vector<wstring> paths;
+        wstring err;
+        bool ok = HasVirtualFiles(data) && !HasFilesOnDisk(data) ? ExtractVirtualFiles(data, paths, err) : ReadDroppedPaths(data, paths);
+        if (!ok || !Fill(paths)) { Log(L"drop: nothing to take from it %s", err.c_str()); OnDragLeave(); return DROPEFFECT_NONE; }
+        return CopyEffect(allowed);
+    }
     int h = HitTest({ pt.x, pt.y });
-    if (h == -1) {   // the centre: on purpose, cancel
+    if (h == -1 || h == kCloseHit) {   // the centre or the cross: on purpose, cancel
         Log(L"wheel: dropped on the centre, cancelled");
         dropped_ = true;
         Hide();
@@ -516,6 +637,7 @@ void Wheel::Draw()
         SetWindowPos(hwnd_, nullptr, -10000, -10000, 1, 1, SWP_NOACTIVATE | SWP_NOZORDER);
         surf_.Release();   // a hidden wheel holds no pixels
         shown_ = closing_ = false;
+        waiting_ = caught_ = false;
         paths_.clear();
         kinds_.clear();
         segs_.clear();
@@ -536,6 +658,31 @@ void Wheel::Draw()
     surf_.DrawShadow(RectF(c - R, c - R, 2 * R, 2 * R), R, 20, 0, 6, th.shadow);
     rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), R, R), surf_.Solid(th.glass));
     rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), R - 0.5f, R - 0.5f), surf_.Solid(th.edge), 1.0f);   // under the segments: a hovered one reaches past it
+    if (waiting_) {
+        // Waiting: a soft ring where the choices will be. With files over it, the disc dims and the ring
+        // lights up, so it's plain where to let go.
+        float inv = float(std::clamp(invite_.value, 0.0, 1.0)), rm = float((kRing0In + kRing0Out) / 2);
+        if (inv > 0.01f) rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), R, R), surf_.Solid(WithAlpha(0xFF000000, 0.3 * inv)));
+        rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), rm, rm), surf_.Solid(inv > 0.01f ? WithAlpha(th.accent, 0.35 + 0.65 * inv) : th.sep),
+                        1.5f + 3.0f * inv);
+        const wchar_t* say = inv > 0.5f ? L"Let go to see the choices" : L"Drag files onto the wheel";
+        // Along the ring, under it: letter by letter, each turned to the curve.
+        D2D1_MATRIX_3X2_F base;
+        rt->GetTransform(&base);
+        double rb = rm + 14, total = 0;
+        std::vector<float> cw;
+        for (const wchar_t* p = say; *p; p++) { wchar_t ch[2] = { *p, 0 }; cw.push_back(surf_.MeasureText(ch, 12, DWRITE_FONT_WEIGHT_SEMI_BOLD)); total += cw.back(); }
+        double a = kPi + total / 2 / rb;   // the left end; the bottom is pi, and the text runs to the right (smaller angles)
+        for (size_t i = 0; say[i]; i++) {
+            double ac = a - cw[i] / 2 / rb;
+            D2D1_POINT_2F p = Polar(c, c, rb, ac);
+            rt->SetTransform(D2D1::Matrix3x2F::Rotation(float((ac - kPi) * 180 / kPi), p) * base);
+            wchar_t ch[2] = { say[i], 0 };
+            surf_.DrawText(ch, 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(p.x - cw[i] / 2, p.y - 8, p.x + cw[i] / 2 + 4, p.y + 10), inv > 0.5f ? th.accent : th.dim);
+            a -= cw[i] / rb;
+        }
+        rt->SetTransform(base);
+    }
 
     for (size_t i = 0; i < segs_.size(); i++) {
         const auto& sg = segs_[i];
@@ -567,14 +714,23 @@ void Wheel::Draw()
     }
     if (twoRings) rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), float(kRing0Out + 3), float(kRing0Out + 3)), surf_.Solid(th.sep), 1.0f);
 
-    // The tabs: every wheel by name, so nobody has to guess what Space or Tab does next.
-    float tw[3], total = 0;
+    // The tabs: every wheel by name, so nobody has to guess what Space or Tab does next. They follow the
+    // rim, centred on the top, with a cross after them that closes the wheel.
+    D2D1_MATRIX_3X2_F base;
+    rt->GetTransform(&base);
+    float tw[3], total = 0, gap = 6;
     for (int i = 0; i < 3; i++) { tw[i] = surf_.MeasureText(WheelName(WheelKind(i)), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 22; total += tw[i]; }
-    total += 2 * 6;
-    float x = c - total / 2, ty = c - R - float(kTabGap + kTabH);
+    total += 2 * gap;
+    tabR_ = R + kTabGap + kTabH / 2;
+    float tr = float(tabR_), h2 = float(kTabH / 2);
+    double a = -total / 2 / tabR_;
     for (int i = 0; i < 3; i++) {
-        tabs_[i] = D2D1::RectF(x - c, ty - c, x + tw[i] - c, ty + float(kTabH) - c);   // relative to the centre, for HitTest
-        D2D1_ROUNDED_RECT pill = D2D1::RoundedRect(D2D1::RectF(x, ty, x + tw[i], ty + float(kTabH)), float(kTabH / 2), float(kTabH / 2));
+        tabA_[i][0] = a;
+        tabA_[i][1] = a + tw[i] / tabR_;
+        double mid = (tabA_[i][0] + tabA_[i][1]) / 2;
+        rt->SetTransform(D2D1::Matrix3x2F::Rotation(float(mid * 180 / kPi), D2D1::Point2F(c, c)) * base);   // drawn at the top, turned into place
+        D2D1_RECT_F box = D2D1::RectF(c - tw[i] / 2, c - tr - h2, c + tw[i] / 2, c - tr + h2);
+        D2D1_ROUNDED_RECT pill = D2D1::RoundedRect(box, h2, h2);
         bool on = i == int(kind_), hover = hot_ == kTabHit - i;
         uint32_t ink = on ? th.accentText : avail_[i] ? th.text : WithAlpha(th.dim, 0.5);
         if (on) rt->FillRoundedRectangle(pill, surf_.Solid(th.accent));
@@ -582,9 +738,19 @@ void Wheel::Draw()
             rt->FillRoundedRectangle(pill, surf_.Solid(hover ? WithAlpha(th.accent, 0.3) : th.glass));
             rt->DrawRoundedRectangle(pill, surf_.Solid(th.edge), 1.0f);
         }
-        const wchar_t* name = WheelName(WheelKind(i));
-        surf_.DrawText(name, 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(x + 11, ty + 4, x + tw[i], ty + float(kTabH)), ink);
-        x += tw[i] + 6;
+        surf_.DrawText(WheelName(WheelKind(i)), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(box.left + 11, box.top + 4, box.right, box.bottom), ink);
+        a = tabA_[i][1] + gap / tabR_;
+    }
+    rt->SetTransform(base);
+    closeA_ = a + h2 / tabR_;
+    {
+        D2D1_POINT_2F x = Polar(c, c, tabR_, closeA_);
+        bool hover = hot_ == kCloseHit;
+        rt->FillEllipse(D2D1::Ellipse(x, h2, h2), surf_.Solid(hover ? 0xFFC42B1C : th.glass));
+        rt->DrawEllipse(D2D1::Ellipse(x, h2 - 0.5f, h2 - 0.5f), surf_.Solid(th.edge), 1.0f);
+        uint32_t ink = hover ? 0xFFFFFFFF : th.text;
+        rt->DrawLine(D2D1::Point2F(x.x - 4.5f, x.y - 4.5f), D2D1::Point2F(x.x + 4.5f, x.y + 4.5f), surf_.Solid(ink), 1.6f);
+        rt->DrawLine(D2D1::Point2F(x.x - 4.5f, x.y + 4.5f), D2D1::Point2F(x.x + 4.5f, x.y - 4.5f), surf_.Solid(ink), 1.6f);
     }
 
     // The centre: what is being dragged, which wheel, and Cancel.
@@ -598,8 +764,8 @@ void Wheel::Draw()
         wstring top = Ellipsize(surf_, CentreText(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, 84);
         float tw = surf_.MeasureText(top.c_str(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD);
         surf_.DrawText(top.c_str(), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(c - tw / 2, c - 17, c + tw / 2 + 2, c + 2), th.text);
-        // How to reach the next wheel: Space while dragging, Tab from the keyboard.
-        const wchar_t* hint = keyboard_ ? L"Tab: next" : L"Space: next";
+        // How to reach the next wheel: Space while dragging, Tab from the keyboard; waiting, how to close it.
+        const wchar_t* hint = waiting_ ? L"here" : keyboard_ ? L"Tab: next" : L"Space: next";
         float bw = surf_.MeasureText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL);
         surf_.DrawText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL, D2D1::RectF(c - bw / 2, c + 1, c + bw / 2 + 2, c + 16), th.dim);
     }

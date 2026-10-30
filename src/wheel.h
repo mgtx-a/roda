@@ -22,6 +22,13 @@ public:
     void Show(WheelKind kind, const std::vector<wstring>& paths, double keySeenAt);
     /// The keyboard route: same wheel, but it takes the focus. Arrows, Tab, Enter, Esc.
     void ShowForKeyboard(const std::vector<wstring>& paths);
+    /// The hotkey with nothing selected: an empty wheel at the pointer that waits for files to be dragged
+    /// onto it. With files over it, it dims and invites the drop; dropped, it fills with their choices and
+    /// waits for a click. It stays while Explorer is used; a click on its centre closes it. `at`: its
+    /// centre (screen) instead of the pointer.
+    void ShowWaiting(const POINT* at = nullptr);
+    /// The floating button: files dropped on it, their choices around `at`, waiting for a click.
+    void ShowFor(const std::vector<wstring>& paths, POINT at);
     void Switch(WheelKind kind);
     /// The next wheel (or the one before) that has something for these files.
     void Next(bool back = false);
@@ -41,6 +48,7 @@ public:
     void Draw();
 
     // Called by the drop target.
+    void OnDragEnter(IDataObject* data);   // a waiting wheel lights up for the files coming
     DWORD OnDragOver(POINTL pt, DWORD allowed);
     void OnDragLeave();
     DWORD OnDrop(IDataObject* data, POINTL pt, DWORD allowed);
@@ -64,6 +72,7 @@ private:
     void StayForClicks();              // the drag ended off the options: keep the wheel, now for clicks
     void ShowCatcher(bool on);
     void Open(double keySeenAt, bool keepCentre = false);
+    void Fit();                        // the window sized for the screen under centre_, the disc whole on it
     int HitTest(POINT screen) const;   // segment index, -1 centre, -2 outside, -10 - i tab i
     void SetHot(int i);
     void Choose(int i);
@@ -86,8 +95,14 @@ private:
     std::vector<WheelOption> more_;  // the choices behind More…
     int hot_ = -2;
     bool avail_[3]{};               // Convert, Tools, Files: has something for these files
-    D2D1_RECT_F tabs_[3]{};         // the tabs, DIPs from the centre
+    double tabA_[3][2]{};           // the tabs along the rim: their start and end angles (clockwise from the top)
+    double closeA_ = 0, tabR_ = 0;  // the close cross after them; the radius they sit on, DIPs
     bool shown_ = false, closing_ = false, dropped_ = false, dirty_ = false, keyboard_ = false;
+    bool waiting_ = false;          // open with no files yet (ShowWaiting)
+    bool moving_ = false;           // a waiting wheel being dragged to another place
+    bool caught_ = false;           // its files came by a drop on a waiting wheel
+    Anim invite_;                   // a waiting wheel with files over it: 0 at rest, 1 dimmed, inviting the drop
+    bool Fill(const std::vector<wstring>& paths);   // a waiting wheel takes dropped files: their choices, Tools first
     POINT centre_{};                // screen pixels
     RECT frame_{};                  // window, screen pixels
     double scale_ = 1;              // DIPs to pixels on this monitor
