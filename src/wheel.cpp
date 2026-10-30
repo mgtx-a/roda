@@ -236,7 +236,7 @@ LRESULT Wheel::Handle(UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         case WM_ACTIVATE:
-            if (keyboard_ && LOWORD(w) == WA_INACTIVE && open()) { Log(L"wheel: closed (another window took the focus)"); Hide(); }
+            if (keyboard_ && !caught_ && LOWORD(w) == WA_INACTIVE && open()) { Log(L"wheel: closed (another window took the focus)"); Hide(); }
             return 0;
     }
     return DefWindowProcW(hwnd_, m, w, l);
@@ -378,12 +378,14 @@ void Wheel::StayForClicks()
     SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, GetWindowLongPtrW(hwnd_, GWL_EXSTYLE) & ~WS_EX_NOACTIVATE);
     SetForegroundWindow(hwnd_);   // for the keys; Windows may say no after another app's drag, and clicks work anyway
     SetFocus(hwnd_);
-    Log(L"wheel: let go off the options; it stays open: click a choice, or anywhere else to close it");
+    Log(caught_ ? L"wheel: it stays open with its files until a choice, the cross, the centre or Esc"
+                : L"wheel: let go off the options; it stays open: click a choice, or anywhere else to close it");
 }
 
 void Wheel::ClickedAt(POINT p)
 {
-    if (keyboard_ && open() && !PtInRect(&frame_, p)) { Log(L"wheel: closed (clicked elsewhere)"); Hide(); }
+    // Files dropped on the wheel stay with it until a choice, the cross, the centre or Esc: other work in between doesn't lose them.
+    if (keyboard_ && !caught_ && open() && !PtInRect(&frame_, p)) { Log(L"wheel: closed (clicked elsewhere)"); Hide(); }
 }
 
 void Wheel::ShowForKeyboard(const std::vector<wstring>& paths)
@@ -743,8 +745,7 @@ void Wheel::Draw()
     }
     closeA_ = tabA_[2][1] + (gap + h2) / tabR_;
     {
-        // Tab: a thin arc along the rim between two tabs, the word in its middle, a head at each end (Tab
-        // goes on round, Shift+Tab back).
+        // Tab: thin arcs along the rim between two tabs, the word in their middle.
         static Com<ID2D1StrokeStyle> round;
         if (!round) D2D()->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND), nullptr, 0, round.Put());
         rt->SetTransform(base);   // the arc and its heads are drawn where they are; only the letters turn
@@ -757,26 +758,26 @@ void Wheel::Draw()
             float cw[3], ww = 0;
             for (int k = 0; k < 3; k++) { wchar_t ch[2] = { word[k], 0 }; cw[k] = surf_.MeasureText(ch, 10, DWRITE_FONT_WEIGHT_SEMI_BOLD); ww += cw[k]; }
             double half = (ww / 2 + 5) / tabR_;
-            auto arc = [&](double from, double to) {
+            auto arc = [&](double from, double to, float r) {
                 Com<ID2D1PathGeometry> geo;
                 Com<ID2D1GeometrySink> sink;
                 if (FAILED(D2D()->CreatePathGeometry(geo.Put())) || FAILED(geo->Open(sink.Put()))) return;
-                sink->BeginFigure(Polar(c, c, tr, from), D2D1_FIGURE_BEGIN_HOLLOW);
-                sink->AddArc(D2D1::ArcSegment(Polar(c, c, tr, to), D2D1::SizeF(tr, tr), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+                sink->BeginFigure(Polar(c, c, r, from), D2D1_FIGURE_BEGIN_HOLLOW);
+                sink->AddArc(D2D1::ArcSegment(Polar(c, c, r, to), D2D1::SizeF(r, r), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
                 sink->EndFigure(D2D1_FIGURE_END_OPEN);
                 sink->Close();
                 rt->DrawGeometry(geo.Get(), ink, 1.1f, round.Get());
             };
-            arc(e0, mid - half);
-            arc(mid + half, e1);
-            auto head = [&](double at, float dir) {   // dir +1: pointing clockwise
-                D2D1_POINT_2F t = Polar(c, c, tr, at);
-                float tx = float(std::cos(at)) * dir, ty = float(std::sin(at)) * dir, nx = float(std::sin(at)), ny = float(-std::cos(at));
-                rt->DrawLine(t, D2D1::Point2F(t.x - 4 * tx + 2.8f * nx, t.y - 4 * ty + 2.8f * ny), ink, 1.1f, round.Get());
-                rt->DrawLine(t, D2D1::Point2F(t.x - 4 * tx - 2.8f * nx, t.y - 4 * ty - 2.8f * ny), ink, 1.1f, round.Get());
+            // Like ⇌: the outer line goes on (Tab), the inner one back (Shift+Tab), each with a half head on its outside.
+            float ro = tr + 2.5f, ri = tr - 2.5f;
+            for (float r : { ro, ri }) { arc(e0, mid - half, r); arc(mid + half, e1, r); }
+            auto barb = [&](double at, float r, float dir, float out) {   // dir +1: pointing clockwise; out +1: barb outwards
+                D2D1_POINT_2F t = Polar(c, c, r, at);
+                float tx = float(std::cos(at)) * dir, ty = float(std::sin(at)) * dir, nx = float(std::sin(at)) * out, ny = float(-std::cos(at)) * out;
+                rt->DrawLine(t, D2D1::Point2F(t.x - 4.5f * tx + 3 * nx, t.y - 4.5f * ty + 3 * ny), ink, 1.1f, round.Get());
             };
-            head(e1, 1);
-            head(e0, -1);
+            barb(e1, ro, 1, 1);
+            barb(e0, ri, -1, -1);
             double ac = mid - ww / 2 / tabR_;
             for (int k = 0; k < 3; k++) {   // the word, letter by letter along the rim
                 double at = ac + cw[k] / 2 / tabR_;
