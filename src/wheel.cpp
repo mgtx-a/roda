@@ -17,6 +17,7 @@ constexpr double kGrow = 6;                         // a hovered segment reaches
 constexpr double kMargin = 30;                      // room around the disc for the shadow and the hover
 constexpr double kTabH = 24, kTabGap = 10;        // the Convert · Tools · Files tabs above the disc
 constexpr double kTabRoom = kTabH + kTabGap + 4;
+constexpr double kTabAt[3] = { -1.6, 0, 1.6 };       // Convert, Tools, Files: their places on the rim (radians from the top)
 constexpr int kTabHit = -10;                        // HitTest: kTabHit - i is tab i
 constexpr int kCloseHit = -9;                       // HitTest: the close cross after the tabs
 constexpr int kPerRing = 8;
@@ -432,8 +433,9 @@ void Wheel::Fit()
     Mon mon = MonitorOf(centre_);
     int disc = int(std::lround((outer + kGrow) * scale_));
     POINT c = centre_;
-    c.x = std::clamp<LONG>(c.x, mon.work.left + disc, std::max<LONG>(mon.work.left + disc, mon.work.right - disc));
     int top = disc + int(std::lround(kTabRoom * scale_));   // the tabs stay on the screen too
+    int side = top;   // Convert and Files on the sides stay on the screen too
+    c.x = std::clamp<LONG>(c.x, mon.work.left + side, std::max<LONG>(mon.work.left + side, mon.work.right - side));
     c.y = std::clamp<LONG>(c.y, mon.work.top + top, std::max<LONG>(mon.work.top + top, mon.work.bottom - disc));
     centre_ = c;
     frame_ = { c.x - px / 2, c.y - px / 2, c.x - px / 2 + px, c.y - px / 2 + px };
@@ -503,10 +505,10 @@ int Wheel::HitTest(POINT p) const
     if (tabR_ > 0) {
         D2D1_POINT_2F x = Polar(0, 0, tabR_, closeA_);
         if (std::hypot(dx - x.x, dy - x.y) <= kTabH / 2 + 3) return kCloseHit;
-        double ta = std::atan2(dx, -dy), slack = 3 / tabR_;   // clockwise from the top, -pi..pi
+        double ta = std::atan2(dx, -dy);   // clockwise from the top, -pi..pi
         if (std::abs(d - tabR_) <= kTabH / 2 + 3)
             for (int i = 0; i < 3; i++)
-                if (avail_[i] && ta >= tabA_[i][0] - slack && ta <= tabA_[i][1] + slack) return kTabHit - i;
+                if (avail_[i] && ta >= tabA_[i][0] - 3 / tabR_ && ta <= tabA_[i][1] + 3 / tabR_) return kTabHit - i;
     }
     if (d < kRing0In) return -1;
     bool twoRings = segs_.size() > size_t(kPerRing);
@@ -714,21 +716,20 @@ void Wheel::Draw()
     }
     if (twoRings) rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), float(kRing0Out + 3), float(kRing0Out + 3)), surf_.Solid(th.sep), 1.0f);
 
-    // The tabs: every wheel by name, so nobody has to guess what Space or Tab does next. They follow the
-    // rim, centred on the top, with a cross after them that closes the wheel.
+    // The tabs: every wheel by name, so nobody has to guess what Space or Tab does next. They sit on the
+    // rim, turned with it: Convert left, Tools on top, Files right. Faint arcs between them say Tab; a
+    // cross after Files closes the wheel.
     D2D1_MATRIX_3X2_F base;
     rt->GetTransform(&base);
-    float tw[3], total = 0, gap = 6;
-    for (int i = 0; i < 3; i++) { tw[i] = surf_.MeasureText(WheelName(WheelKind(i)), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 22; total += tw[i]; }
-    total += 2 * gap;
+    auto turn = [&](double a) { rt->SetTransform(D2D1::Matrix3x2F::Rotation(float(a * 180 / kPi), D2D1::Point2F(c, c)) * base); };   // drawn at the top, turned into place
+    float tw[3], gap = 6;
+    for (int i = 0; i < 3; i++) tw[i] = surf_.MeasureText(WheelName(WheelKind(i)), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 22;
     tabR_ = R + kTabGap + kTabH / 2;
     float tr = float(tabR_), h2 = float(kTabH / 2);
-    double a = -total / 2 / tabR_;
     for (int i = 0; i < 3; i++) {
-        tabA_[i][0] = a;
-        tabA_[i][1] = a + tw[i] / tabR_;
-        double mid = (tabA_[i][0] + tabA_[i][1]) / 2;
-        rt->SetTransform(D2D1::Matrix3x2F::Rotation(float(mid * 180 / kPi), D2D1::Point2F(c, c)) * base);   // drawn at the top, turned into place
+        tabA_[i][0] = kTabAt[i] - tw[i] / 2 / tabR_;
+        tabA_[i][1] = kTabAt[i] + tw[i] / 2 / tabR_;
+        turn((tabA_[i][0] + tabA_[i][1]) / 2);
         D2D1_RECT_F box = D2D1::RectF(c - tw[i] / 2, c - tr - h2, c + tw[i] / 2, c - tr + h2);
         D2D1_ROUNDED_RECT pill = D2D1::RoundedRect(box, h2, h2);
         bool on = i == int(kind_), hover = hot_ == kTabHit - i;
@@ -739,10 +740,54 @@ void Wheel::Draw()
             rt->DrawRoundedRectangle(pill, surf_.Solid(th.edge), 1.0f);
         }
         surf_.DrawText(WheelName(WheelKind(i)), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(box.left + 11, box.top + 4, box.right, box.bottom), ink);
-        a = tabA_[i][1] + gap / tabR_;
+    }
+    closeA_ = tabA_[2][1] + (gap + h2) / tabR_;
+    {
+        // Tab: a thin arc along the rim between two tabs, the word in its middle, a head at each end (Tab
+        // goes on round, Shift+Tab back).
+        static Com<ID2D1StrokeStyle> round;
+        if (!round) D2D()->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_ROUND), nullptr, 0, round.Put());
+        rt->SetTransform(base);   // the arc and its heads are drawn where they are; only the letters turn
+        uint32_t col = WithAlpha(th.dim, 0.7);
+        ID2D1SolidColorBrush* ink = surf_.Solid(col);
+        for (int pair = 0; pair < 2; pair++) {   // Convert to Tools, Tools to Files
+            rt->SetTransform(base);
+            double e0 = tabA_[pair][1] + 0.07, e1 = tabA_[pair + 1][0] - 0.07, mid = (e0 + e1) / 2;
+            const wchar_t* word = L"Tab";
+            float cw[3], ww = 0;
+            for (int k = 0; k < 3; k++) { wchar_t ch[2] = { word[k], 0 }; cw[k] = surf_.MeasureText(ch, 10, DWRITE_FONT_WEIGHT_SEMI_BOLD); ww += cw[k]; }
+            double half = (ww / 2 + 5) / tabR_;
+            auto arc = [&](double from, double to) {
+                Com<ID2D1PathGeometry> geo;
+                Com<ID2D1GeometrySink> sink;
+                if (FAILED(D2D()->CreatePathGeometry(geo.Put())) || FAILED(geo->Open(sink.Put()))) return;
+                sink->BeginFigure(Polar(c, c, tr, from), D2D1_FIGURE_BEGIN_HOLLOW);
+                sink->AddArc(D2D1::ArcSegment(Polar(c, c, tr, to), D2D1::SizeF(tr, tr), 0, D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1_ARC_SIZE_SMALL));
+                sink->EndFigure(D2D1_FIGURE_END_OPEN);
+                sink->Close();
+                rt->DrawGeometry(geo.Get(), ink, 1.1f, round.Get());
+            };
+            arc(e0, mid - half);
+            arc(mid + half, e1);
+            auto head = [&](double at, float dir) {   // dir +1: pointing clockwise
+                D2D1_POINT_2F t = Polar(c, c, tr, at);
+                float tx = float(std::cos(at)) * dir, ty = float(std::sin(at)) * dir, nx = float(std::sin(at)), ny = float(-std::cos(at));
+                rt->DrawLine(t, D2D1::Point2F(t.x - 4 * tx + 2.8f * nx, t.y - 4 * ty + 2.8f * ny), ink, 1.1f, round.Get());
+                rt->DrawLine(t, D2D1::Point2F(t.x - 4 * tx - 2.8f * nx, t.y - 4 * ty - 2.8f * ny), ink, 1.1f, round.Get());
+            };
+            head(e1, 1);
+            head(e0, -1);
+            double ac = mid - ww / 2 / tabR_;
+            for (int k = 0; k < 3; k++) {   // the word, letter by letter along the rim
+                double at = ac + cw[k] / 2 / tabR_;
+                turn(at);
+                wchar_t ch[2] = { word[k], 0 };
+                surf_.DrawText(ch, 10, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(c - cw[k] / 2, c - tr - 7, c + cw[k] / 2 + 3, c - tr + 8), col);
+                ac += cw[k] / tabR_;
+            }
+        }
     }
     rt->SetTransform(base);
-    closeA_ = a + h2 / tabR_;
     {
         D2D1_POINT_2F x = Polar(c, c, tabR_, closeA_);
         bool hover = hot_ == kCloseHit;

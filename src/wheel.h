@@ -96,7 +96,7 @@ private:
     int hot_ = -2;
     bool avail_[3]{};               // Convert, Tools, Files: has something for these files
     double tabA_[3][2]{};           // the tabs along the rim: their start and end angles (clockwise from the top)
-    double closeA_ = 0, tabR_ = 0;  // the close cross after them; the radius they sit on, DIPs
+    double closeA_ = 0, tabR_ = 0;  // the close cross: its angle, and the radius it sits on, DIPs
     bool shown_ = false, closing_ = false, dropped_ = false, dirty_ = false, keyboard_ = false;
     bool waiting_ = false;          // open with no files yet (ShowWaiting)
     bool moving_ = false;           // a waiting wheel being dragged to another place
