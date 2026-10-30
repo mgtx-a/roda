@@ -10,6 +10,8 @@ constexpr double kPad = 24;            // room for the shadow around the card
 constexpr double kHandle = 9;          // crop handles: how close counts
 constexpr double kBtnW = 92, kBtnH = 30;
 constexpr double kListTop = 50;        // Merge: where the list of files starts, below the title
+constexpr double kStripTop = 50;       // Remove pages: the strip of pages, below the title
+constexpr double kThumbH = 168, kGap = 14, kNumH = 24, kBarH = 14;   // a page's height, between pages, its label, the scroll bar
 const wchar_t* kAspects[] = { L"Free", L"1:1", L"4:3", L"16:9" };
 const double kRatios[] = { 0, 1.0, 4.0 / 3.0, 16.0 / 9.0 };
 
@@ -77,6 +79,11 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
     } else if (kind == Popup::Order) {
         w_ = 400;
         h_ = kListTop + names_.size() * RowH() + 10 + kBtnH + 16 + whereH_;
+    } else if (kind == Popup::Pages) {
+        // About five pages across; the button's words grow with the count ("Remove 12 pages").
+        w_ = 640;
+        h_ = kStripTop + kThumbH + kNumH + kBarH + 10 + whereH_ + kBtnH + 16;
+        applyW_ = std::max(applyW_, double(surf_.MeasureText(L"Remove 999 pages", 12.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD)) + 28);
     } else if (kind == Popup::Size && !sizeFields_) {
         w_ = 320;
         h_ = 46 + 30 + 36 + kBtnH + 16 + whereH_;   // room for the keys' hint under the sizes
@@ -130,6 +137,84 @@ void OptionsPopup::ShowOrder(const wstring& title, const std::vector<wstring>& n
     Show(Popup::Order, title, at, 0);
 }
 
+void OptionsPopup::ShowPages(const wstring& title, POINT at)
+{
+    token_++;
+    pages_ = 0;
+    thumbs_.clear();
+    asked_.clear();
+    removed_.clear();
+    scroll_ = 0;
+    pageAspect_ = 0.707;
+    focusPage_ = 0;
+    hoverPage_ = pressPage_ = -1;
+    pageKeys_ = false;
+    Show(Popup::Pages, title, at, 0);
+    asked_.insert(0);
+    if (onNeedPage) onNeedPage(token_, 0);   // its answer also says how many pages there are
+}
+
+void OptionsPopup::SetPage(int token, int page, const wstring& png, int pages)
+{
+    if (token != token_ || !shown_ || kind_ != Popup::Pages) { DeleteFileW(png.c_str()); return; }
+    Mips m = LoadMips(png, 1024);
+    DeleteFileW(png.c_str());   // loaded; the temp file isn't needed any more
+    if (pages_ == 0 && pages > 0) {
+        pages_ = pages;
+        if (!m.empty()) pageAspect_ = std::clamp(double(m.width()) / std::max(1, m.height()), 0.4, 1.8);
+    }
+    if (!m.empty()) thumbs_[page] = std::move(m);
+    AskVisible();
+    dirty_ = true;
+    RequestFrame();
+}
+
+double OptionsPopup::PageW() const { return kThumbH * pageAspect_; }
+
+double OptionsPopup::MaxScroll() const { return std::max(0.0, pages_ * (PageW() + kGap) - kGap - (w_ - 40)); }
+
+void OptionsPopup::ScrollBy(double dx)
+{
+    // From where a glide is heading, so quick wheel turns add up instead of starting over.
+    ScrollTo((glide_.Active() ? glide_.Target() : scroll_) + dx);
+}
+
+void OptionsPopup::ScrollTo(double x)
+{
+    if (!glide_.Active()) glide_.Set(scroll_);
+    double to = std::clamp(x, 0.0, MaxScroll());
+    if (ReducedMotion()) { glide_.Set(to); scroll_ = to; }
+    else glide_.Spring(to, 0.28, 1.0);   // no bounce: it settles on the spot
+    AskVisible();
+    dirty_ = true;
+    RequestFrame();
+}
+
+void OptionsPopup::ShowPage(int page)
+{
+    double left = page * (PageW() + kGap), view = w_ - 40, at = glide_.Active() ? glide_.Target() : scroll_;
+    if (left < at) ScrollTo(left);
+    else if (left + PageW() > at + view) ScrollTo(left + PageW() - view);
+}
+
+void OptionsPopup::AskVisible()
+{
+    if (pages_ <= 0 || !onNeedPage) return;
+    // The pages in view and a few past either side, so a scroll finds them drawn.
+    double slot = PageW() + kGap;
+    int first = std::max(0, int(scroll_ / slot) - 2), last = std::min(pages_ - 1, int((scroll_ + w_ - 40) / slot) + 3);
+    for (int p = first; p <= last; p++)
+        if (asked_.insert(p).second) onNeedPage(token_, p);
+}
+
+void OptionsPopup::TogglePage(int page)
+{
+    if (page < 0 || page >= pages_) return;
+    if (!removed_.erase(page)) removed_.insert(page);
+    dirty_ = true;
+    RequestFrame();
+}
+
 /// Merge: the picked row goes to row `to`, the rows between shift up or down.
 void OptionsPopup::MoveRow(int to)
 {
@@ -153,6 +238,8 @@ void OptionsPopup::Hide()
     ShowWindow(hwnd_, SW_HIDE);
     surf_.Release();
     pic_ = {};
+    thumbs_.clear();   // the pages' pictures; answers still on their way are dropped (the token moves on)
+    token_++;
 }
 
 D2D1_RECT_F OptionsPopup::PictureRect() const
@@ -171,7 +258,16 @@ OptionsPopup::Part OptionsPopup::HitTest(double x, double y, int* aspect) const
     for (size_t i = 0; i < presetX_.size() && kind_ == Popup::Size; i++)
         if (In(x, y, L + presetX_[i].first, T + 46, presetX_[i].second, 30)) { *aspect = int(i); return Part::Preset; }
     if (kind_ == Popup::Quality && In(x, y, L + 12, T + 60, w_ - 24, 30)) return Part::Slider;
-    if (kind_ == Popup::Pages && In(x, y, L + 20, T + 64, w_ - 40, 34)) return Part::Width;
+    if (kind_ == Popup::Pages && pages_ > 0) {
+        double sx = L + 20, sw = w_ - 40, sy = T + kStripTop;
+        if (MaxScroll() > 0 && In(x, y, sx, sy + kThumbH + kNumH, sw, kBarH)) return Part::ScrollBar;
+        if (In(x, y, sx, sy, sw, kThumbH + kNumH)) {
+            double cx = x - sx + scroll_, slot = PageW() + kGap;
+            int i = int(cx / slot);
+            if (i < pages_ && cx - i * slot < PageW()) { *aspect = i; return Part::Page; }
+            return Part::Strip;   // between pages: still drags the strip
+        }
+    }
     if (kind_ == Popup::Order && In(x, y, L + 20, T + kListTop, w_ - 40, order_.size() * RowH())) {
         *aspect = int((y - T - kListTop) / RowH());
         return Part::Row;
@@ -226,6 +322,24 @@ void OptionsPopup::Drag(double x, double y)
     }
     if (drag_ == Part::Row) {   // the row follows the pointer; the others make way
         MoveRow(int(std::floor((y - kPad - kListTop) / RowH())));
+        return;
+    }
+    if (drag_ == Part::Strip) {   // the pages follow the pointer, once it has really moved (else it's a click)
+        if (std::fabs(x - dragX_) > 4) moved_ = true;
+        if (moved_) {
+            double now = Now(), dt = now - lastT_;
+            if (dt > 0.004) { flingV_ = flingV_ * 0.4 + (x - lastX_) / dt * 0.6; lastX_ = x; lastT_ = now; }   // smoothed speed
+            scroll_ = std::clamp(startX_ - (x - dragX_), 0.0, MaxScroll());
+            glide_.Set(scroll_);
+            AskVisible();
+        }
+        return;
+    }
+    if (drag_ == Part::ScrollBar) {   // the bar's thumb centres on the pointer
+        double view = w_ - 40, content = MaxScroll() + view;
+        scroll_ = std::clamp((x - kPad - 20) / view * content - view / 2, 0.0, MaxScroll());
+        glide_.Set(scroll_);
+        AskVisible();
         return;
     }
     D2D1_RECT_F pr = PictureRect();
@@ -295,9 +409,15 @@ void OptionsPopup::Apply()
         opts.Set(L"start", a);
         if (b > 0) opts.Set(L"end", b);
     } else if (kind_ == Popup::Pages) {
-        // Checked against the page count by the worker, which has the PDF open.
-        if (width_.find_first_of(L"0123456789") == wstring::npos) { MessageBeep(MB_OK); return; }
-        opts.Set(L"pages", width_);
+        // The pages clicked away, as page numbers ("2, 5-7"); the worker checks them against the PDF again.
+        if (removed_.empty() || int(removed_.size()) >= pages_) { MessageBeep(MB_OK); return; }
+        wstring spec;
+        for (auto it = removed_.begin(); it != removed_.end();) {
+            int a = *it, b = a;
+            while (++it != removed_.end() && *it == b + 1) b = *it;
+            spec += (spec.empty() ? L"" : L", ") + std::to_wstring(a + 1) + (b > a ? L"-" + std::to_wstring(b + 1) : L"");
+        }
+        opts.Set(L"pages", spec);
     } else if (kind_ == Popup::Crop) {
         int x = int(std::lround(cx_ * origW_)), y = int(std::lround(cy_ * origH_));
         int w = std::max(1, int(std::lround(cw_ * origW_))), h = std::max(1, int(std::lround(ch_ * origH_)));
@@ -323,7 +443,21 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             if (p == Part::Width || p == Part::Height) { field_ = p == Part::Width ? 0 : 1; presetSel_ = -1; dirty_ = true; RequestFrame(); return 0; }
             if (p == Part::Aspect) { SetAspect(a); dirty_ = true; RequestFrame(); return 0; }
             if (p == Part::Preset) { ApplyPreset(a); return 0; }
+            if (p == Part::Page || p == Part::Strip) {
+                // A click on a page removes it (or brings it back); a drag scrolls the pages.
+                drag_ = Part::Strip;
+                glide_.Set(scroll_);   // a press stops a glide where it is, as on a phone
+                dragX_ = lastX_ = x;
+                lastT_ = Now();
+                flingV_ = 0;
+                startX_ = scroll_;
+                pressPage_ = p == Part::Page ? a : -1;
+                moved_ = false;
+                SetCapture(hwnd_);
+                return 0;
+            }
             if (p == Part::Row) selected_ = a;
+            if (p == Part::ScrollBar) { drag_ = p; SetCapture(hwnd_); Drag(x, y); return 0; }
             if (p == Part::Slider || p == Part::Row || (p >= Part::CropMove && p <= Part::CropSW)) {
                 drag_ = p;
                 dragX_ = x; dragY_ = y;
@@ -347,12 +481,34 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             if (drag_ != Part::None) { Drag(x, y); dirty_ = true; RequestFrame(); return 0; }
             int a = -1;
             Part p = HitTest(x, y, &a);
-            int preset = p == Part::Preset ? a : -1;
-            if (p != hover_ || preset != hoverPreset_) { hover_ = p; hoverPreset_ = preset; dirty_ = true; RequestFrame(); }
+            int preset = p == Part::Preset ? a : -1, page = p == Part::Page ? a : -1;
+            if (p != hover_ || preset != hoverPreset_ || page != hoverPage_) {
+                hover_ = p;
+                hoverPreset_ = preset;
+                hoverPage_ = page;
+                if (page >= 0) pageKeys_ = false;   // the mouse is back: its page is the one marked
+                dirty_ = true;
+                RequestFrame();
+            }
             return 0;
         }
+        case WM_MOUSEWHEEL: case WM_MOUSEHWHEEL:
+            if (kind_ == Popup::Pages) {
+                // Either wheel scrolls the pages sideways, a page at a step.
+                double steps = GET_WHEEL_DELTA_WPARAM(w) / double(WHEEL_DELTA);
+                ScrollBy((m == WM_MOUSEWHEEL ? -steps : steps) * (PageW() + kGap));
+                return 0;
+            }
+            break;
         case WM_LBUTTONUP: {
             auto [x, y] = local(l);
+            if (drag_ == Part::Strip && !moved_ && pressPage_ >= 0) { TogglePage(pressPage_); focusPage_ = pressPage_; }
+            if (drag_ == Part::Strip && moved_ && Now() - lastT_ < 0.08 && std::fabs(flingV_) > 150 && !ReducedMotion()) {
+                // Let go while moving: the strip slides on and slows to a stop.
+                glide_.Set(scroll_);
+                glide_.Ease(std::clamp(scroll_ - flingV_ * 0.32, 0.0, MaxScroll()), 0.55, Curve::EaseOut);
+                AskVisible();
+            }
             if (drag_ != Part::None) { drag_ = Part::None; ReleaseCapture(); return 0; }
             int a;
             Part p = HitTest(x, y, &a);
@@ -369,8 +525,9 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 case Part::CropNW: case Part::CropSE: c = IDC_SIZENWSE; break;
                 case Part::CropNE: case Part::CropSW: c = IDC_SIZENESW; break;
                 case Part::Width: case Part::Height: c = IDC_IBEAM; break;
-                case Part::Apply: case Part::Cancel: case Part::Aspect: case Part::Slider: case Part::Preset: c = IDC_HAND; break;
-                case Part::Row: c = IDC_SIZENS; break;
+                case Part::Apply: case Part::Cancel: case Part::Aspect: case Part::Slider: case Part::Preset: case Part::Page: c = IDC_HAND; break;
+                case Part::ScrollBar: case Part::Strip: c = IDC_SIZEWE; break;
+                case Part::Row: c = IDC_HAND; break;   // a hand: take hold of the file and move it
                 default: break;
             }
             SetCursor(LoadCursorW(nullptr, c));
@@ -386,6 +543,12 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 int to = selected_ + (w == VK_UP ? -1 : 1);
                 if (m == WM_SYSKEYDOWN || (GetKeyState(VK_CONTROL) & 0x8000)) MoveRow(to);
                 else selected_ = std::clamp(to, 0, int(order_.size()) - 1);
+            }
+            if (kind_ == Popup::Pages && pages_ > 0) {
+                // Arrows walk the pages; Delete or Space removes the one they're on (or brings it back).
+                int to = w == VK_LEFT ? focusPage_ - 1 : w == VK_RIGHT ? focusPage_ + 1 : w == VK_HOME ? 0 : w == VK_END ? pages_ - 1 : -1;
+                if (to >= 0 || w == VK_LEFT) { focusPage_ = std::clamp(to, 0, pages_ - 1); pageKeys_ = true; ShowPage(focusPage_); }
+                if (w == VK_DELETE || w == VK_SPACE) { pageKeys_ = true; TogglePage(focusPage_); }
             }
             if (w == VK_RETURN) {
                 if (presetSel_ >= 0 && presetSel_ < int(presets_.size())) ApplyPreset(presetSel_);
@@ -411,7 +574,7 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 quality_ = std::clamp(quality_ + (w == VK_RIGHT ? step : -step), 1, 100);
             }
             if ((kind_ == Popup::Size || kind_ == Popup::Trim) && w == VK_TAB) field_ ^= 1;
-            if ((kind_ == Popup::Size || kind_ == Popup::Trim || kind_ == Popup::Pages) && w == VK_BACK) { wstring& f = field_ ? height_ : width_; if (!f.empty()) f.pop_back(); }
+            if ((kind_ == Popup::Size || kind_ == Popup::Trim) && w == VK_BACK) { wstring& f = field_ ? height_ : width_; if (!f.empty()) f.pop_back(); }
             if (kind_ == Popup::Crop && w >= '1' && w <= '4') SetAspect(int(w - '1'));
             dirty_ = true;
             RequestFrame();
@@ -422,11 +585,6 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 if (presetSel_ >= 0) { presetSel_ = -1; field_ = 0; }   // typing a number means your own size
                 wstring& f = field_ ? height_ : width_;
                 if (f.size() < 5 && !(f.empty() && w == L'0')) f += wchar_t(w);
-                dirty_ = true;
-                RequestFrame();
-            }
-            if (kind_ == Popup::Pages && ((w >= L'0' && w <= L'9') || w == L',' || w == L'-' || w == L' ')) {
-                if (width_.size() < 40) width_ += wchar_t(w);
                 dirty_ = true;
                 RequestFrame();
             }
@@ -470,7 +628,10 @@ void OptionsPopup::Draw()
     float by = T + H - 16 - float(kBtnH);
     const wchar_t* verb = kind_ == Popup::Quality ? L"Compress" : kind_ == Popup::Size ? L"Resize" : kind_ == Popup::Trim ? L"Trim" : kind_ == Popup::Pages ? L"Remove" :
                           kind_ == Popup::Order ? L"Merge" : L"Crop";
-    if (sizeFields_) button(L + W - 20 - float(applyW_), by, float(applyW_), apply_.empty() ? verb : apply_.c_str(), true, hover_ == Part::Apply);
+    wstring applyText = apply_.empty() ? verb : apply_;
+    if (kind_ == Popup::Pages)   // the button counts what it will do
+        applyText = removed_.empty() ? L"Remove pages" : L"Remove " + std::to_wstring(removed_.size()) + (removed_.size() == 1 ? L" page" : L" pages");
+    if (sizeFields_) button(L + W - 20 - float(applyW_), by, float(applyW_), applyText.c_str(), true, hover_ == Part::Apply);
     button(L + float(CancelX()), by, float(kBtnW), L"Cancel", false, hover_ == Part::Cancel);
     if (!where_.empty()) {
         // Where the result goes, so nobody has to hunt for it afterwards.
@@ -529,14 +690,79 @@ void OptionsPopup::Draw()
         surf_.DrawText(trim ? L"Minutes:seconds, like 1:30" : L"Leave one on auto to keep the proportions", 11, DWRITE_FONT_WEIGHT_NORMAL,
                        RectF(L + 20, Tf + 104, W - 40, 16), th.dim);
     } else if (kind_ == Popup::Pages) {
-        float fw = W - 40;
-        surf_.DrawText(L"Pages to remove", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, T + 46, fw, 16), th.dim);
-        rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(L + 20, T + 64, fw, 34), 8, 8), surf_.Solid(th.button));
-        rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(L + 20.75, T + 64.75, fw - 1.5f, 32.5), 7.5f, 7.5f), surf_.Solid(th.accent), 1.5f);
-        surf_.DrawText(width_.empty() ? L"2, 5-7" : width_.c_str(), 13, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 32, T + 72, fw - 24, 20), width_.empty() ? th.dim : th.text);
-        float cw = width_.empty() ? 0 : surf_.MeasureText(width_.c_str(), 13, DWRITE_FONT_WEIGHT_NORMAL);
-        rt->DrawLine(D2D1::Point2F(L + 32 + cw + 1, T + 73), D2D1::Point2F(L + 32 + cw + 1, T + 89), surf_.Solid(th.text), 1);
-        surf_.DrawText(L"Page numbers, like 2 or 5-7, with commas between", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, T + 104, fw, 16), th.dim);
+        // The pages side by side: a click removes one (a red cross over it), another click brings it back.
+        if (glide_.Active()) {   // on its way: follow it, and keep the frames coming
+            scroll_ = std::clamp(glide_.value, 0.0, MaxScroll());
+            AskVisible();
+            dirty_ = true;
+        }
+        float sx = L + 20, sw = W - 40, sy = T + float(kStripTop), th_ = float(kThumbH);
+        if (pages_ > 0) {
+            wstring count = std::to_wstring(pages_) + (pages_ == 1 ? L" page" : L" pages");
+            float cw = surf_.MeasureText(count.c_str(), 12, DWRITE_FONT_WEIGHT_NORMAL);
+            surf_.DrawText(count.c_str(), 12, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + W - 20 - cw, T + 18, cw + 4, 18), th.dim);
+        }
+        rt->PushAxisAlignedClip(D2D1::RectF(sx, sy - 3, sx + sw, sy + th_ + float(kNumH)), D2D1_ANTIALIAS_MODE_ALIASED);
+        float pw = float(PageW()), slot = pw + float(kGap);
+        for (int i = 0; i < std::max(1, pages_); i++) {
+            float x = sx + i * slot - float(scroll_);
+            if (x + pw < sx || x > sx + sw) continue;
+            D2D1_RECT_F box = RectF(x, sy, pw, th_);
+            bool removed = removed_.count(i) > 0, hot = hoverPage_ == i, keyed = pageKeys_ && focusPage_ == i;
+            auto it = thumbs_.find(i);
+            if (it != thumbs_.end()) {
+                // The page on white paper, its own shape fitted in the slot.
+                const Mips& m = it->second;
+                double k = std::min(pw / std::max(1, m.width()), th_ / std::max(1, m.height()));
+                float mw = float(m.width() * k), mh = float(m.height() * k);
+                D2D1_RECT_F fit = RectF(x + (pw - mw) / 2, sy + (th_ - mh) / 2, mw, mh);
+                rt->FillRectangle(fit, surf_.Solid(0xFFFFFFFF));
+                surf_.DrawMips(m, fit, removed ? 0.3f : 1.0f);
+                rt->DrawRectangle(fit, surf_.Solid(th.edge), 1);
+            } else {
+                rt->FillRoundedRectangle(D2D1::RoundedRect(box, 4, 4), surf_.Solid(th.button));   // still on its way
+            }
+            if (removed) {
+                float m = std::min(pw, th_) * 0.22f;
+                auto red = surf_.Solid(th.error);
+                rt->DrawLine(D2D1::Point2F(x + m, sy + th_ / 2 - (pw / 2 - m)), D2D1::Point2F(x + pw - m, sy + th_ / 2 + (pw / 2 - m)), red, 3);
+                rt->DrawLine(D2D1::Point2F(x + pw - m, sy + th_ / 2 - (pw / 2 - m)), D2D1::Point2F(x + m, sy + th_ / 2 + (pw / 2 - m)), red, 3);
+            }
+            if (hot || keyed) {
+                // The page fades back and a big button sits in its middle: the trash can, or on a removed page
+                // the way back.
+                rt->FillRectangle(box, surf_.Solid(WithAlpha(th.glass | 0xFF000000, 0.55)));
+                rt->DrawRoundedRectangle(D2D1::RoundedRect(RectF(x - 2, sy - 2, pw + 4, th_ + 4), 5, 5), surf_.Solid(removed ? th.accent : th.error), 2);
+                D2D1_POINT_2F c = D2D1::Point2F(x + pw / 2, sy + th_ / 2);
+                rt->FillEllipse(D2D1::Ellipse(c, 25, 25), surf_.Solid(removed ? th.accent : th.error));
+                auto ink = surf_.Solid(0xFFFFFFFF);
+                if (removed) {   // a curved arrow: bring it back
+                    surf_.DrawText(L"↺", 26, DWRITE_FONT_WEIGHT_SEMI_BOLD, RectF(c.x - 11.5f, c.y - 19, 28, 34), 0xFFFFFFFF);
+                } else {
+                    float s = 1.9f;   // the trash can, drawn on a 12-unit grid
+                    rt->DrawLine(D2D1::Point2F(c.x - 6 * s, c.y - 4 * s), D2D1::Point2F(c.x + 6 * s, c.y - 4 * s), ink, 2);   // lid
+                    rt->DrawLine(D2D1::Point2F(c.x - 2 * s, c.y - 6 * s), D2D1::Point2F(c.x + 2 * s, c.y - 6 * s), ink, 2);   // handle
+                    rt->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(c.x - 4.5f * s, c.y - 2 * s, c.x + 4.5f * s, c.y + 6.5f * s), 2, 2), ink, 2);   // can
+                    rt->DrawLine(D2D1::Point2F(c.x - 1.6f * s, c.y), D2D1::Point2F(c.x - 1.6f * s, c.y + 4.5f * s), ink, 1.5f);
+                    rt->DrawLine(D2D1::Point2F(c.x + 1.6f * s, c.y), D2D1::Point2F(c.x + 1.6f * s, c.y + 4.5f * s), ink, 1.5f);
+                }
+            }
+            wstring label = pages_ == 0 ? L"Loading…" : removed ? L"Removed" : std::to_wstring(i + 1);
+            float lw = surf_.MeasureText(label.c_str(), 11.5f, removed ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL);
+            surf_.DrawText(label.c_str(), 11.5f, removed ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+                           RectF(x + (pw - lw) / 2, sy + th_ + 5, lw + 4, 16), removed ? th.error : th.dim);
+        }
+        rt->PopAxisAlignedClip();
+        if (MaxScroll() > 0) {   // where in the PDF the strip is
+            float by_ = sy + th_ + float(kNumH) + 4, content = float(MaxScroll()) + sw;
+            rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(sx, by_, sw, 5), 2.5f, 2.5f), surf_.Solid(th.sep));
+            float tw = std::max(30.0f, sw * sw / content), tx = sx + float(scroll_) / float(MaxScroll()) * (sw - tw);
+            rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(tx, by_, tw, 5), 2.5f, 2.5f), surf_.Solid(hover_ == Part::ScrollBar ? th.accent : th.dim));
+        }
+        const wchar_t* tip = removed_.empty() ? L"Click a page to remove it" : int(removed_.size()) >= pages_ ? L"Keep at least one page" : L"Click again to keep it";
+        wstring hint = Ellipsize(surf_, tip, 11, DWRITE_FONT_WEIGHT_NORMAL, float(CancelX()) - 28);   // never under the buttons
+        surf_.DrawText(hint.c_str(), 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by + 8, float(CancelX()) - 28, 16),
+                       int(removed_.size()) >= pages_ && pages_ > 0 ? th.error : th.dim);
     } else if (kind_ == Popup::Order) {
         if (whereFor && !order_.empty()) where_ = whereFor(order_[0]);   // the first file decides the folder
         // The files top to bottom, in the order their pages will come: number, name, and a grip to drag by.
@@ -555,7 +781,10 @@ void OptionsPopup::Draw()
             for (int k = 0; k < 3; k++)   // the grip: three short lines
                 rt->DrawLine(D2D1::Point2F(L + W - 42, y + rh / 2 - 4 + k * 4), D2D1::Point2F(L + W - 30, y + rh / 2 - 4 + k * 4), surf_.Solid(th.dim), 1.2f);
         }
-        surf_.DrawText(L"Drag to reorder, or Alt+↑↓", 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + 20, by + 8, float(CancelX()) - 28, 16), th.dim);
+        // The hint beside the title, clear of the buttons whatever their words make them.
+        const wchar_t* hint = L"Drag to reorder, or Alt+↑↓";
+        float hw = surf_.MeasureText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL);
+        surf_.DrawText(hint, 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + W - 20 - hw, T + 19, hw + 4, 16), th.dim);
     } else if (kind_ == Popup::Crop) {
         wstring dims = std::to_wstring(int(std::lround(cw_ * origW_))) + L" × " + std::to_wstring(int(std::lround(ch_ * origH_)));
         float dw = surf_.MeasureText(dims.c_str(), 12, DWRITE_FONT_WEIGHT_NORMAL);

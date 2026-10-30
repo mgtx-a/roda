@@ -400,6 +400,16 @@ struct App {
             }
             return;
         }
+        if (id == L"pdf.mergewith") {
+            // One PDF: the files to merge it with are picked now (from its folder), then put in order as usual.
+            auto more = PickFiles(L"Merge " + FileName(paths[0]) + L" with", L"Merge", ParentDir(paths[0]), true);
+            if (more.empty()) return;
+            std::vector<wstring> all = paths;
+            for (auto& m : more) if (m != paths[0]) all.push_back(m);
+            Log(L"merge with: %d more file(s) picked", int(all.size() - 1));
+            ShowMerge(all);
+            return;
+        }
         if (c->popup == Popup::None) { Submit(o, paths, Json::Object()); return; }
         if (c->popup == Popup::Place) {
             OpenPlace(o, paths[0], id == L"pdf.sign" ? PlaceWindow::Mode::Sign : id == L"pdf.fill" ? PlaceWindow::Mode::Fill : PlaceWindow::Mode::Picture);
@@ -434,7 +444,26 @@ struct App {
             else popup.SetPresets({ { L"50%", L"tool.resize50" }, { L"1920 px", L"tool.resize1920" }, { L"1080 px", L"tool.resize1080" } }, true);
             popup.Show(Popup::Size, L"Resize " + Named(paths), at, 0);
         }
-        else if (c->popup == Popup::Pages) popup.Show(Popup::Pages, L"Remove pages from " + FileName(paths[0]), at, 0);
+        else if (c->popup == Popup::Pages) {
+            // Pictures of the pages, small, each from a quiet job as it scrolls into view.
+            wstring pdf = paths[0];
+            popup.onNeedPage = [this, pdf](int token, int page) {
+                Job j = MakeJob(L"prep.preview", { pdf }, Json::Object().Set(L"max", 420).Set(L"page", page));
+                static int n = 0;
+                j.outPath = JoinPath(TempDir(), L"thumb-" + std::to_wstring(++n) + L".png");
+                j.outDir.clear();
+                int jid = jobs.Submit(j, FileName(pdf), L"Page", true);
+                waiting[jid] = [this, token, page, pdf](const JobState& s) {
+                    if (s.phase == JobState::Done) { popup.SetPage(token, page, s.out, int(s.info[L"info"][L"pages"].Num(0))); return; }
+                    // The first page can't be drawn: the PDF can't be opened (a password, damage). Say so.
+                    if (page == 0 && popup.shown() && popup.token() == token) {
+                        popup.Hide();
+                        cards.Note(FileName(pdf), s.error.empty() ? L"Could not open this PDF." : s.error, true);
+                    }
+                };
+            };
+            popup.ShowPages(L"Remove pages from " + FileName(pdf), at);
+        }
         else if (c->popup == Popup::Trim) popup.Show(Popup::Trim, L"Trim " + (paths.size() == 1 ? FileName(paths[0]) : L""), at, 0);
         else if (c->popup == Popup::Order) {
             std::vector<wstring> names;
@@ -522,30 +551,44 @@ struct App {
         trayAdded = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
     }
 
-    /// Files picked in a dialog, then the wheel for them (driven by clicks or keys, like "Roda…" in Explorer).
-    void ChooseFiles()
+    /// Files picked in Windows' own dialog, several at once; empty when cancelled. It starts in `folder`
+    /// when given, and with `mergeable` shows PDFs and pictures first.
+    std::vector<wstring> PickFiles(const wstring& title, const wchar_t* ok, const wstring& folder = L"", bool mergeable = false)
     {
+        std::vector<wstring> paths;
         Com<IFileOpenDialog> dlg;
-        if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dlg.Put())))) return;
+        if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(dlg.Put())))) return paths;
         DWORD o = 0;
         dlg->GetOptions(&o);
         dlg->SetOptions(o | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST);
-        dlg->SetTitle(L"Choose files for Roda");
-        dlg->SetOkButtonLabel(L"Choose");
+        dlg->SetTitle(title.c_str());
+        dlg->SetOkButtonLabel(ok);
+        if (mergeable) {
+            COMDLG_FILTERSPEC types[] = { { L"PDFs and pictures", L"*.pdf;*.jpg;*.jpeg;*.png;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.heic;*.avif;*.svg;*.ico" }, { L"All files", L"*.*" } };
+            dlg->SetFileTypes(2, types);
+        }
+        Com<IShellItem> start;
+        if (!folder.empty() && SUCCEEDED(SHCreateItemFromParsingName(folder.c_str(), nullptr, IID_PPV_ARGS(start.Put())))) dlg->SetFolder(start.Get());
         BeginModal();
         HRESULT hr = dlg->Show(nullptr);
         EndModal();
         Com<IShellItemArray> items;
-        if (FAILED(hr) || FAILED(dlg->GetResults(items.Put()))) return;
+        if (FAILED(hr) || FAILED(dlg->GetResults(items.Put()))) return paths;
         DWORD n = 0;
         items->GetCount(&n);
-        std::vector<wstring> paths;
         for (DWORD i = 0; i < n; i++) {
             Com<IShellItem> item;
             PWSTR p = nullptr;
             if (SUCCEEDED(items->GetItemAt(i, item.Put())) && SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &p)) && p) paths.push_back(p);
             CoTaskMemFree(p);
         }
+        return paths;
+    }
+
+    /// Files picked in a dialog, then the wheel for them (driven by clicks or keys, like "Roda…" in Explorer).
+    void ChooseFiles()
+    {
+        auto paths = PickFiles(L"Choose files for Roda", L"Choose");
         if (paths.empty() || settings.paused) return;
         Log(L"choose files: %d item(s)", int(paths.size()));
         wheel.ShowForKeyboard(paths);

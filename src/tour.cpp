@@ -15,8 +15,8 @@ struct Step {
 
 const Step kSteps[] = {
     { L"Drag a file, then press Space", L"Start dragging a picture or a document. While the mouse button is still down, press Space.",
-      L"A wheel opens under the pointer. Space again: Tools, then Files. No file to hand? Practice file.", 0 },
-    { L"Drop it on a format", L"Move onto a segment and let go. The result is saved next to the original, under a new name.",
+      L"A wheel of tools opens under the pointer. Space again: Convert, then Files. No file to hand? Practice file.", 0 },
+    { L"Drop it on a choice", L"Move onto a segment and let go. The result is saved next to the original, under a new name.",
       L"A card in the corner shows it, with Open and Show in folder. Esc or the centre cancels.", 1 },
     { L"You're all set", L"No dragging? Right-click files and choose Roda… (Shift + right-click on Windows 11), press Ctrl + Alt + R, or",
       L"use Choose files… in the tray menu. The tray also has Recent, for what you made, and Take the tour.", 2 },

@@ -141,6 +141,7 @@ void Trigger::CountCpu()
 
 void Trigger::ButtonDown(POINT p)
 {
+    wheel_.ClickedAt(p);   // a wheel waiting for a click: a click elsewhere closes it
     HideProbe();
     paths_.clear();
     down_ = p;
@@ -293,13 +294,15 @@ void Trigger::CheckKeys()
         if (!wheel_.open()) wheel_.Show(kind, paths_, Now());
         else wheel_.Switch(kind);
     }
-    // Space opens the wheel (Convert first), Space or Tab again moves to the next one. Windows leaves
-    // both alone during a drag, so a wheel that doesn't open never turns the drop into a copy, a move
-    // or a shortcut, as Ctrl, Shift and Alt do.
+    // Space opens the wheel (Tools first, or Convert for files without tools), Space or Tab again moves to
+    // the next one. Windows leaves both alone during a drag, so a wheel that doesn't open never turns the
+    // drop into a copy, a move or a shortcut, as Ctrl, Shift and Alt do.
     bool space = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0, tab = (GetAsyncKeyState(VK_TAB) & 0x8000) != 0;
     if ((space && !spaceWasDown_) || (tab && !tabWasDown_)) {
-        if (!wheel_.open()) wheel_.Show(WheelKind::Convert, paths_, Now());
-        else wheel_.Next();
+        if (!wheel_.open()) {
+            wheel_.Show(WheelKind::Tools, paths_, Now());
+            if (wheel_.open() && wheel_.kind() != WheelKind::Tools) wheel_.Switch(WheelKind::Convert);   // it fell back to Files
+        } else wheel_.Next();
     }
     spaceWasDown_ = space;
     tabWasDown_ = tab;

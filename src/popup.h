@@ -1,11 +1,14 @@
 // The small options popup some tools need before they run: Compress (a quality slider), Size
-// (width and height), Trim (start and end), Remove pages (which pages), Crop (a rectangle on a preview)
-// and Merge (the files' order). Mouse first; keys work once it has focus:
+// (width and height), Trim (start and end), Remove pages (the pages, to click away), Crop (a rectangle on
+// a preview) and Merge (the files' order). Mouse first; keys work once it has focus:
 // arrows, digits, Tab, Enter applies, Esc cancels.
 #pragma once
 #include "anim.h"
 #include "gfx.h"
 #include "registry.h"
+
+#include <map>
+#include <set>
 
 namespace rd {
 
@@ -26,6 +29,13 @@ public:
     std::function<wstring(size_t first)> whereFor;
     /// Merge: the files in a list to put in order; applies with "order", the new order as indexes ("2,0,1").
     void ShowOrder(const wstring& title, const std::vector<wstring>& names, POINT at);
+    /// Remove pages: the PDF's pages side by side to click away; applies with "pages" ("2, 5-7").
+    /// Pictures of the pages are asked for as they scroll into view: onNeedPage(token, page), answered
+    /// by SetPage (token says which showing it was for; a late answer to an old one is dropped).
+    void ShowPages(const wstring& title, POINT at);
+    std::function<void(int token, int page)> onNeedPage;
+    void SetPage(int token, int page, const wstring& png, int pages);
+    int token() const { return token_; }
     void Hide();
     bool shown() const { return shown_; }
 
@@ -36,7 +46,8 @@ public:
     void Draw();
 
 private:
-    enum class Part { None, Slider, Width, Height, Apply, Cancel, CropMove, CropN, CropS, CropE, CropW, CropNE, CropNW, CropSE, CropSW, Aspect, Row, Preset };
+    enum class Part { None, Slider, Width, Height, Apply, Cancel, CropMove, CropN, CropS, CropE, CropW, CropNE, CropNW, CropSE, CropSW, Aspect, Row, Preset,
+                      Page, Strip, ScrollBar };
     static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l);
     LRESULT Handle(UINT m, WPARAM w, LPARAM l);
     Part HitTest(double x, double y, int* aspect) const;
@@ -49,6 +60,14 @@ private:
     double CancelX() const;               // DIPs from the card's left
     double FieldsTop() const { return presets_.empty() ? 0 : 44; }
     double RowH() const { return std::clamp(360.0 / std::max<size_t>(1, names_.size()), 22.0, 34.0); }
+    // Remove pages: the strip of pages, DIPs.
+    double PageW() const;                    // one page's slot (the first page's shape)
+    double MaxScroll() const;
+    void ScrollBy(double dx);                // glides there (wheel, keys); blends with a glide already going
+    void ScrollTo(double x);
+    void ShowPage(int page);                 // scrolled so the page is in view
+    void AskVisible();                       // pictures for the pages in view and just past
+    void TogglePage(int page);
 
     HWND hwnd_ = nullptr;
     Surface surf_;
@@ -76,6 +95,16 @@ private:
     double applyW_ = 92, whereH_ = 0;
     int hoverPreset_ = -1;
     int presetSel_ = -1;                     // the size picked with Tab or the arrows; -1: the fields have the keys
+    int pages_ = 0;                          // Remove pages: how many (0 until the first picture says)
+    std::map<int, Mips> thumbs_;             // pictures of the pages that have arrived
+    std::set<int> asked_, removed_;          // 0-based
+    double scroll_ = 0, pageAspect_ = 0.707; // width over height of the first page
+    int focusPage_ = 0, hoverPage_ = -1, pressPage_ = -1;
+    bool moved_ = false;                     // the press became a drag (a scroll), not a click
+    bool pageKeys_ = false;                  // the arrows are in use: show which page has them
+    Anim glide_;                             // the strip's scroll on its way somewhere (wheel, keys, a fling)
+    double flingV_ = 0, lastX_ = 0, lastT_ = 0;   // a drag's speed (DIPs a second), for the slide after letting go
+    int token_ = 0;
     Part drag_ = Part::None, hover_ = Part::None;
     double dragX_ = 0, dragY_ = 0, startX_ = 0, startY_ = 0, startW_ = 0, startH_ = 0;
 };

@@ -73,6 +73,27 @@ private:
     bool hasFiles_ = false;
 };
 
+/// The catcher's: over it nothing can be dropped (the pointer says so), and a drop there is a slip of the
+/// hand, so the wheel stays open for a click. Leaving it for the wheel is nothing to act on.
+class CatcherDropTarget : public DropTarget {
+public:
+    Wheel* wheel = nullptr;
+    STDMETHODIMP DragEnter(IDataObject*, DWORD, POINTL pt, DWORD* effect) override { return DragOver(0, pt, effect); }
+    STDMETHODIMP DragOver(DWORD, POINTL pt, DWORD* effect) override
+    {
+        if (wheel) wheel->OnDragOver(pt, *effect);   // the wheel loses its highlight
+        *effect = DROPEFFECT_NONE;
+        return S_OK;
+    }
+    STDMETHODIMP DragLeave() override { return S_OK; }
+    STDMETHODIMP Drop(IDataObject* data, DWORD, POINTL pt, DWORD* effect) override
+    {
+        if (wheel) wheel->OnDrop(data, pt, *effect);
+        *effect = DROPEFFECT_NONE;
+        return S_OK;
+    }
+};
+
 // ---------------------------------------------------------------- window
 
 Wheel::Wheel(const Settings& settings) : settings_(settings) {}
@@ -84,6 +105,11 @@ Wheel::~Wheel()
         DestroyWindow(hwnd_);
     }
     if (target_) { target_->wheel = nullptr; target_->Release(); }
+    if (catcher_) {
+        RevokeDragDrop(catcher_);
+        DestroyWindow(catcher_);
+    }
+    if (catcherTarget_) { catcherTarget_->wheel = nullptr; catcherTarget_->Release(); }
 }
 
 bool Wheel::Create(HINSTANCE inst)
@@ -101,6 +127,22 @@ bool Wheel::Create(HINSTANCE inst)
     target_->wheel = this;
     HRESULT hr = RegisterDragDrop(hwnd_, target_);
     if (FAILED(hr)) Log(L"wheel: could not accept drops (0x%08lx)", hr);
+    // The catcher: all but invisible (alpha 1 of 255 still takes the drop; 0 would let it through).
+    WNDCLASSW cc{};
+    cc.lpfnWndProc = DefWindowProcW;
+    cc.hInstance = inst;
+    cc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    cc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    cc.lpszClassName = L"RodaCatcher";
+    RegisterClassW(&cc);
+    catcher_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, cc.lpszClassName, L"", WS_POPUP,
+                               0, 0, 1, 1, nullptr, nullptr, inst, nullptr);
+    if (catcher_) {
+        SetLayeredWindowAttributes(catcher_, 0, 1, LWA_ALPHA);
+        catcherTarget_ = new CatcherDropTarget();
+        catcherTarget_->wheel = this;
+        if (FAILED(RegisterDragDrop(catcher_, catcherTarget_))) Log(L"wheel: the catcher could not take drops");
+    }
     // Load the font now: the first wheel would otherwise wait ~15 ms for DirectWrite.
     for (float size : { 10.5f, 11.0f, 11.5f, 12.0f, 12.5f, 14.0f })
         for (auto wt : { DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD }) {
@@ -217,7 +259,34 @@ void Wheel::Show(WheelKind kind, const std::vector<wstring>& paths, double keySe
         kind_ = WheelKind::Actions;
         if (!Build()) return;
     }
+    if (keySeenAt >= 0) ShowCatcher(true);   // opened mid-drag: below the wheel, over everything else
     Open(keySeenAt);
+}
+
+void Wheel::ShowCatcher(bool on)
+{
+    if (!catcher_) return;
+    if (!on) { ShowWindow(catcher_, SW_HIDE); return; }
+    int x = GetSystemMetrics(SM_XVIRTUALSCREEN), y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    SetWindowPos(catcher_, HWND_TOPMOST, x, y, GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN), SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+void Wheel::StayForClicks()
+{
+    if (!shown_ || closing_ || keyboard_) return;
+    // The drag is over, so the catcher can go; the wheel takes clicks now, and a click elsewhere closes it.
+    ShowCatcher(false);
+    keyboard_ = true;
+    lastMouse_ = CursorPos();
+    SetWindowLongPtrW(hwnd_, GWL_EXSTYLE, GetWindowLongPtrW(hwnd_, GWL_EXSTYLE) & ~WS_EX_NOACTIVATE);
+    SetForegroundWindow(hwnd_);   // for the keys; Windows may say no after another app's drag, and clicks work anyway
+    SetFocus(hwnd_);
+    Log(L"wheel: let go off the options; it stays open: click a choice, or anywhere else to close it");
+}
+
+void Wheel::ClickedAt(POINT p)
+{
+    if (keyboard_ && open() && !PtInRect(&frame_, p)) { Log(L"wheel: closed (clicked elsewhere)"); Hide(); }
 }
 
 void Wheel::ShowForKeyboard(const std::vector<wstring>& paths)
@@ -306,6 +375,7 @@ void Wheel::Hide(bool animated)
 {
     if (!shown_ || closing_) return;
     closing_ = true;
+    ShowCatcher(false);
     if (!animated || ReducedMotion()) fade_.Set(0);
     else { fade_.Ease(0, 0.12, Curve::EaseIn); open_.Ease(0.92, 0.12, Curve::EaseIn); }
     if (keyboard_) {
@@ -321,9 +391,7 @@ void Wheel::ButtonReleased()
     if (!shown_ || closing_ || dropped_) return;
     // The drop is delivered by the drag source a moment after the button goes up.
     uint32_t t = token_;
-    After(0.35, [this, t] {
-        if (t == token_ && shown_ && !dropped_) { Log(L"wheel: released away from the wheel, nothing done"); Hide(); }
-    });
+    After(0.35, [this, t] { if (t == token_ && shown_ && !closing_ && !dropped_) StayForClicks(); });
 }
 
 int Wheel::HitTest(POINT p) const
@@ -411,12 +479,13 @@ DWORD Wheel::OnDrop(IDataObject* data, POINTL pt, DWORD allowed)
 {
     if (!shown_ || closing_) return DROPEFFECT_NONE;
     int h = HitTest({ pt.x, pt.y });
-    if (h < 0) {
-        Log(h == -1 ? L"wheel: dropped on the centre, cancelled" : L"wheel: dropped outside the options, nothing done");
+    if (h == -1) {   // the centre: on purpose, cancel
+        Log(L"wheel: dropped on the centre, cancelled");
         dropped_ = true;
         Hide();
         return DROPEFFECT_NONE;
     }
+    if (h < 0) { StayForClicks(); return DROPEFFECT_NONE; }   // off the options (or on a tab): a slip, the wheel stays
     std::vector<wstring> paths;
     wstring err;
     if (HasVirtualFiles(data) && !HasFilesOnDisk(data)) {

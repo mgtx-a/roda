@@ -9,6 +9,7 @@
 namespace rd {
 
 class WheelDropTarget;
+class CatcherDropTarget;
 
 class Wheel {
 public:
@@ -26,8 +27,10 @@ public:
     void Next(bool back = false);
     void Hide(bool animated = true);
     /// The mouse button went up. A drop on the wheel arrives about now from the drag source;
-    /// if none does, the wheel closes.
+    /// if none does, the wheel stays open for a click.
     void ButtonReleased();
+    /// A mouse button went down somewhere: outside a wheel that waits for clicks, that closes it.
+    void ClickedAt(POINT screen);
 
     bool shown() const { return shown_; }
     bool open() const { return shown_ && !closing_; }   // shown and not on its way out
@@ -58,6 +61,8 @@ private:
     static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l);
     LRESULT Handle(UINT m, WPARAM w, LPARAM l);
     bool Build();                      // false when this wheel has nothing for these files
+    void StayForClicks();              // the drag ended off the options: keep the wheel, now for clicks
+    void ShowCatcher(bool on);
     void Open(double keySeenAt, bool keepCentre = false);
     int HitTest(POINT screen) const;   // segment index, -1 centre, -2 outside, -10 - i tab i
     void SetHot(int i);
@@ -69,6 +74,10 @@ private:
     const Settings& settings_;
     HWND hwnd_ = nullptr;
     WheelDropTarget* target_ = nullptr;
+    // An invisible window over every screen while a dragged wheel is open: a drop anywhere off the wheel
+    // lands on Roda (nothing done) instead of in a folder, where Windows would move or copy the file.
+    HWND catcher_ = nullptr;
+    CatcherDropTarget* catcherTarget_ = nullptr;
     Surface surf_;
     WheelKind kind_ = WheelKind::Convert;
     std::vector<wstring> paths_;

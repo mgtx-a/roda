@@ -24,10 +24,12 @@ Until the first release, test builds are on the repository's **Actions** tab.
 ## How to use it
 1. Double-click `Roda.exe`. A small wheel icon appears near the clock.
 2. Start dragging a file, as if you were moving it.
-3. While still holding the mouse button, press **Space**. A wheel opens with the formats it can change
-   into (Convert). Press **Space** or **Tab** again for the next wheel:
-   - **Tools**: edit the file: smaller, resized, cropped, rotated...
+3. While still holding the mouse button, press **Space**. A wheel of tools opens: smaller, resized,
+   cropped, rotated, pages removed... (Tools). Press **Space** or **Tab** again for the next wheel:
+   - **Convert**: the formats it can change into
    - **Files**: copy, move, zip, and so on
+
+   A file without tools (a Word document, say) opens on Convert instead.
 
    The names of the three wheels sit above the wheel, so you can see which one is open. You can also
    drag onto a name to switch to that wheel.
@@ -42,7 +44,8 @@ Until the first release, test builds are on the repository's **Actions** tab.
 The new file is saved next to the original, with the same name: `photo.jpg` becomes `photo.png`.
 **Your original file is never changed.**
 
-To cancel: press **Esc**, or let go in the middle of the wheel. To stop a job that's running, click the
+To cancel: press **Esc**, or let go in the middle of the wheel. Let go anywhere else by mistake and
+nothing happens to the file: the wheel stays open, so click a choice, or click elsewhere to close it. To stop a job that's running, click the
 **×** on its card.
 
 The first time you start Roda, a short tour shows you how it works. It has a **Practice file** button
@@ -63,6 +66,8 @@ with Ctrl held makes a copy, with Shift a move, with Alt a shortcut.)
   The result is saved in your **Downloads** folder.
 
 ### Merge files into one PDF
+Dragging one PDF? Drop it on **Merge with…** (Tools), then pick the files to add to it.
+
 Select two or more PDFs or pictures, then either press **Ctrl+Alt+M**, or right-click them and choose
 **Merge into one PDF** (on Windows 11, Shift + right-click). A list of the files opens: drag them
 into the order you want (or pick one and press **Alt+↑/↓**), then click **Merge**. The new PDF is saved
