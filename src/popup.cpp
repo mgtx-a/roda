@@ -124,7 +124,13 @@ void OptionsPopup::Show(Popup kind, const wstring& title, POINT at, int quality,
     } else if (kind == Popup::Order) {
         w_ = 420;
         whereH_ = 22;   // the line where the result goes, kept even while the basket is empty
-        h_ = kListTop + OrderListH() + 10 + kBtnH + 16 + whereH_;
+        // The list may be as tall as the screen leaves room for, beside the title and the buttons; past
+        // that it scrolls.
+        Mon m = MonitorOf(at);
+        double room = (m.work.bottom - m.work.top) / scale_ - 2 * kPad - (kListTop + 10 + kBtnH + 16 + whereH_) - 24;
+        maxListH_ = std::clamp(room, 3 * 34.0, 480.0);
+        listScroll_ = 0;
+        h_ = kListTop + ListViewH() + 10 + kBtnH + 16 + whereH_;
     } else if (kind == Popup::Pages) {
         // About five pages across; the button's words grow with the count ("Remove 12 pages").
         w_ = 640;
@@ -175,7 +181,6 @@ double OptionsPopup::CancelX() const
 
 void OptionsPopup::ShowOrder(const std::vector<wstring>& paths, POINT at)
 {
-    // shortcut: no scrolling; past about 16 files the rows get cramped. Add a scrolling list when merges that big turn up.
     items_.clear();
     orderNote_.clear();
     selected_ = 0;
@@ -191,9 +196,17 @@ double OptionsPopup::OrderListH() const
     return items_.empty() ? 3 * 34.0 : items_.size() * RowH() + 4 + kDropH;
 }
 
+void OptionsPopup::ListShow(int row)
+{
+    double rh = RowH(), top = row * rh;
+    if (top < listScroll_) ListScrollTo(top);
+    else if (top + rh > listScroll_ + ListViewH()) ListScrollTo(top + rh - ListViewH());
+}
+
 void OptionsPopup::Relayout()
 {
-    h_ = kListTop + OrderListH() + 10 + kBtnH + 16 + whereH_;
+    h_ = kListTop + ListViewH() + 10 + kBtnH + 16 + whereH_;
+    ListScrollTo(listScroll_);
     int pw = int(std::lround((w_ + 2 * kPad) * scale_)), ph = int(std::lround((h_ + 2 * kPad) * scale_));
     // It grows downwards from where it is, moving up only as far as the screen's bottom needs.
     Mon mon = MonitorOf({ frame_.left + pw / 2, frame_.top + kPad });
@@ -227,6 +240,7 @@ void OptionsPopup::AddFiles(const std::vector<wstring>& paths)
     if (items_.size() > before) selected_ = int(items_.size()) - 1;
     Log(L"popup: merge basket has %d file(s)", int(items_.size()));
     Relayout();
+    if (items_.size() > before) ListScrollTo(MaxListScroll());   // the new ones are at the end
 }
 
 void OptionsPopup::ShowPages(const wstring& title, POINT at)
@@ -362,10 +376,14 @@ OptionsPopup::Part OptionsPopup::HitTest(double x, double y, int* aspect) const
     }
     if (kind_ == Popup::Order) {
         if (In(x, y, L + 20, by, kAddW, kBtnH)) return Part::AddFiles;
-        if (In(x, y, L + 20, T + kListTop, w_ - 40, items_.size() * RowH())) {
-            *aspect = int((y - T - kListTop) / RowH());
-            // The cross left of the grip takes the file out; the rest of the row drags it.
-            return In(x, y, L + w_ - 20 - 62, T + kListTop, 26, items_.size() * RowH()) ? Part::RowRemove : Part::Row;
+        double vh = ListViewH(), top = T + kListTop;
+        if (In(x, y, L + 20, top, w_ - 40, vh)) {
+            int row = int((y - top + listScroll_) / RowH());
+            if (row < int(items_.size())) {
+                *aspect = row;
+                // The cross left of the grip takes the file out; the rest of the row drags it.
+                return In(x, y, L + w_ - 20 - 62, top, 26, vh) ? Part::RowRemove : Part::Row;
+            }
         }
     }
     if ((kind_ == Popup::Size && sizeFields_) || kind_ == Popup::Trim) {
@@ -417,7 +435,10 @@ void OptionsPopup::Drag(double x, double y)
         return;
     }
     if (drag_ == Part::Row) {   // the row follows the pointer; the others make way
-        MoveRow(int(std::floor((y - kPad - kListTop) / RowH())));
+        double inList = y - kPad - kListTop;
+        if (inList < 0) ListScrollTo(listScroll_ - 8);
+        else if (inList > ListViewH()) ListScrollTo(listScroll_ + 8);
+        MoveRow(int(std::floor((std::clamp(inList, 0.0, ListViewH() - 1) + listScroll_) / RowH())));
         return;
     }
     if (drag_ == Part::Strip) {   // the pages follow the pointer, once it has really moved (else it's a click)
@@ -593,6 +614,12 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
             return 0;
         }
         case WM_MOUSEWHEEL: case WM_MOUSEHWHEEL:
+            if (kind_ == Popup::Order && m == WM_MOUSEWHEEL) {
+                ListScrollTo(listScroll_ - GET_WHEEL_DELTA_WPARAM(w) / double(WHEEL_DELTA) * 3 * RowH());
+                dirty_ = true;
+                RequestFrame();
+                return 0;
+            }
             if (kind_ == Popup::Pages) {
                 // Either wheel scrolls the pages sideways, a page at a step.
                 double steps = GET_WHEEL_DELTA_WPARAM(w) / double(WHEEL_DELTA);
@@ -644,6 +671,7 @@ LRESULT OptionsPopup::Handle(UINT m, WPARAM w, LPARAM l)
                 int to = selected_ + (w == VK_UP ? -1 : 1);
                 if (m == WM_SYSKEYDOWN || (GetKeyState(VK_CONTROL) & 0x8000)) MoveRow(to);
                 else selected_ = std::clamp(to, 0, std::max(0, int(items_.size()) - 1));
+                ListShow(selected_);
             }
             if (kind_ == Popup::Order && w == VK_DELETE) RemoveRow(selected_);
             if (kind_ == Popup::Pages && pages_ > 0) {
@@ -875,9 +903,11 @@ void OptionsPopup::Draw()
     } else if (kind_ == Popup::Order) {
         // The files top to bottom, in the order their pages will come: number, name, a cross to take it out
         // (on the row under the pointer), and a grip to drag by. Below them, the place to drop more.
-        float rh = float(RowH()), y0 = T + float(kListTop);
+        float rh = float(RowH()), top = T + float(kListTop), vh = float(ListViewH()), y0 = top - float(listScroll_);
+        rt->PushAxisAlignedClip(D2D1::RectF(L + 18, top, L + W - 18, top + vh), D2D1_ANTIALIAS_MODE_ALIASED);
         for (size_t i = 0; i < items_.size(); i++) {
             float y = y0 + float(i) * rh;
+            if (y + rh < top || y > top + vh) continue;   // scrolled out of view
             bool picked = int(i) == selected_, hot = int(i) == hoverRow_;
             rt->FillRoundedRectangle(D2D1::RoundedRect(RectF(L + 20, y + 1, W - 40, rh - 3), 7, 7),
                                      surf_.Solid(picked ? WithAlpha(th.accent, 0.18) : th.button));
@@ -912,6 +942,11 @@ void OptionsPopup::Draw()
             const wchar_t* sub = L"from Explorer, as many times as you like";
             float bw = surf_.MeasureText(sub, 11, DWRITE_FONT_WEIGHT_NORMAL);
             surf_.DrawText(sub, 11, DWRITE_FONT_WEIGHT_NORMAL, RectF(L + (W - bw) / 2, dy + dh / 2 + 2, bw + 4, 16), th.dim);
+        }
+        rt->PopAxisAlignedClip();
+        if (MaxListScroll() > 0) {   // a slim bar in the margin says there's more, and where in the list this is
+            float total = float(OrderListH()), bh = std::max(24.0f, vh * vh / total), bt = top + float(listScroll_ / MaxListScroll()) * (vh - bh);
+            rt->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(L + W - 13, bt, L + W - 10, bt + bh), 1.5f, 1.5f), surf_.Solid(WithAlpha(th.dim, 0.6)));
         }
         button(L + 20, by, float(kAddW), L"Add files…", false, hover_ == Part::AddFiles);
         if (items_.size() > 1) {   // the hint beside the title, clear of the buttons whatever their words make them

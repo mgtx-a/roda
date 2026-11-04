@@ -300,8 +300,7 @@ void Trigger::CheckKeys()
     bool space = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0, tab = (GetAsyncKeyState(VK_TAB) & 0x8000) != 0;
     if ((space && !spaceWasDown_) || (tab && !tabWasDown_)) {
         if (!wheel_.open()) {
-            wheel_.Show(WheelKind::Tools, paths_, Now());
-            if (wheel_.open() && wheel_.kind() != WheelKind::Tools) wheel_.Switch(WheelKind::Convert);   // it fell back to Files
+            wheel_.Show(WheelKind::Tools, paths_, Now());   // Tools first; files without tools get Convert
         } else wheel_.Next();
     }
     spaceWasDown_ = space;

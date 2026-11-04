@@ -101,7 +101,13 @@ void Bubble::Show(bool on)
 {
     if (!hwnd_ || on == shown_) return;
     shown_ = on;
-    if (on) { dirty_ = true; Draw(); ShowWindow(hwnd_, SW_SHOWNOACTIVATE); }
+    if (on) {
+        // Hiding let go of the pixels (a full-screen app, say): make them again, the size it was.
+        surf_.Resize(frame_.right - frame_.left, frame_.bottom - frame_.top);
+        dirty_ = true;
+        Draw();
+        ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+    }
     else { ShowWindow(hwnd_, SW_HIDE); surf_.Release(); }
 }
 

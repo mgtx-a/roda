@@ -69,6 +69,11 @@ private:
     double FieldsTop() const { return presets_.empty() ? 0 : 44; }
     double RowH() const { return std::clamp(360.0 / std::max<size_t>(1, items_.size()), 22.0, 34.0); }
     double OrderListH() const;               // Merge: the rows, and the place to drop more below them
+    // Merge: the part of the list on the card. A long one scrolls, so the buttons stay on the screen.
+    double ListViewH() const { return std::min(OrderListH(), maxListH_); }
+    double MaxListScroll() const { return std::max(0.0, OrderListH() - ListViewH()); }
+    void ListScrollTo(double y) { listScroll_ = std::clamp(y, 0.0, MaxListScroll()); }
+    void ListShow(int row);                  // scrolled so the row is in view
     void Relayout();                         // Merge: the card's height follows its rows
     // Remove pages: the strip of pages, DIPs.
     double PageW() const;                    // one page's slot (the first page's shape)
@@ -98,6 +103,7 @@ private:
     std::vector<wstring> items_;             // Merge: the files, top to bottom
     int selected_ = 0;                       // Merge: the row picked (by click or arrows)
     int hoverRow_ = -1;
+    double listScroll_ = 0, maxListH_ = 480; // Merge: how far the list is scrolled, and its tallest, DIPs
     bool dropHover_ = false;                 // Merge: files being dragged over the card
     wstring orderNote_;                      // Merge: why dropped files weren't taken
     PopupDropTarget* drop_ = nullptr;

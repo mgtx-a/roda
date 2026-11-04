@@ -55,6 +55,8 @@ public:
 
     /// An option was chosen, by a drop or by the keyboard.
     std::function<void(const WheelOption& option, const std::vector<wstring>& paths, POINT at)> onChoose;
+    /// Choose files… on the waiting wheel: the app asks which, then opens ShowFor with them.
+    std::function<void()> onChooseFiles;
     /// More… was chosen: the choices that didn't fit, to offer as a list.
     std::function<void(const std::vector<WheelOption>& rest, const std::vector<wstring>& paths, POINT at)> onMore;
 
@@ -69,6 +71,7 @@ private:
     static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l);
     LRESULT Handle(UINT m, WPARAM w, LPARAM l);
     bool Build();                      // false when this wheel has nothing for these files
+    bool BuildFirst(WheelKind want);   // `want`, else the same order everywhere: Tools, Convert, Files
     void StayForClicks();              // the drag ended off the options: keep the wheel, now for clicks
     void ShowCatcher(bool on);
     void Open(double keySeenAt, bool keepCentre = false);
@@ -76,6 +79,7 @@ private:
     int HitTest(POINT screen) const;   // segment index, -1 centre, -2 outside, -10 - i tab i
     void SetHot(int i);
     void Choose(int i);
+    void ChooseFiles();                // the waiting wheel's button (or Enter)
     void Present();
     wstring CentreText() const;
     bool Mixed() const;
@@ -97,10 +101,13 @@ private:
     bool avail_[3]{};               // Convert, Tools, Files: has something for these files
     double tabA_[3][2]{};           // the tabs along the rim: their start and end angles (clockwise from the top)
     double closeA_ = 0, tabR_ = 0;  // the close cross: its angle, and the radius it sits on, DIPs
+    D2D1_RECT_F tabBox_[3]{};       // each tab, upright, DIPs from the centre
+    double chooseW_ = 0, chooseY_ = 0;   // the waiting wheel's Choose files… button: its width, and its middle below the centre
     bool shown_ = false, closing_ = false, dropped_ = false, dirty_ = false, keyboard_ = false;
     bool waiting_ = false;          // open with no files yet (ShowWaiting)
     bool moving_ = false;           // a waiting wheel being dragged to another place
     bool caught_ = false;           // its files came by a drop on a waiting wheel
+    bool incoming_ = false;         // other files dragged over a wheel that holds some: a drop takes them, no old choice runs
     Anim invite_;                   // a waiting wheel with files over it: 0 at rest, 1 dimmed, inviting the drop
     bool Fill(const std::vector<wstring>& paths);   // a waiting wheel takes dropped files: their choices, Tools first
     POINT centre_{};                // screen pixels

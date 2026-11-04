@@ -182,6 +182,15 @@ struct App {
         if (!settings.welcomed && !TestMode()) After(1.5, [this] { StartTour(); });
         wheel.onChoose = [this](const WheelOption& o, const std::vector<wstring>& paths, POINT at) { Chosen(o, paths, at); };
         wheel.onMore = [this](const std::vector<WheelOption>& rest, const std::vector<wstring>& paths, POINT at) { ChooseMore(rest, paths, at); };
+        wheel.onChooseFiles = [this] {
+            // The waiting wheel steps aside for the picker (it's always on top), then comes back with the files.
+            POINT c = wheel.centre();
+            wheel.Hide(false);
+            auto paths = PickFiles(L"Choose files for Roda", L"Choose");
+            if (paths.empty() || settings.paused || wheel.open()) return;
+            Log(L"choose files: %d item(s) for the waiting wheel", int(paths.size()));
+            wheel.ShowFor(paths, c);
+        };
         jobs.onChange = [this](const JobState& s) {
             if (!s.quiet) {
                 cards.Update(s);
@@ -458,6 +467,8 @@ struct App {
                 if (const Converter* sized = FindConverter(opts[L"op"].Str())) Submit({ sized, sized->label, L"", o.icon }, paths, Json::Object());
                 return;
             }
+            // The page numbers are the shown PDF's: they mean nothing for another one.
+            if (o.conv->popup == Popup::Pages) { Submit(o, { paths[0] }, opts); return; }
             if (opts.has(L"q")) { settings.compressQuality = int(opts[L"q"].Num()); settings.Save(); }
             // Merge: the files the basket ended with, in its order (some may have been added or taken out).
             std::vector<wstring> files;

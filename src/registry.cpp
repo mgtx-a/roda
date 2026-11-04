@@ -241,7 +241,7 @@ const std::vector<Converter>& Converters()
         { L"pdf.split",       WheelKind::Tools, L"Split",       Bit(Kind::Pdf), Icon::Split, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.images",      WheelKind::Tools, L"Images",      Bit(Kind::Pdf), Icon::Images, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
         { L"pdf.rotate",      WheelKind::Tools, L"Rotate",      Bit(Kind::Pdf), Icon::Rotate, C::PerFile, 1, 0, Popup::None, RunPdfTool, Engine::Pdfium },
-        { L"pdf.remove",      WheelKind::Tools, L"Remove pages", Bit(Kind::Pdf), Icon::RemovePage, C::PerFile, 1, 0, Popup::Pages, RunPdfTool, Engine::Pdfium },
+        { L"pdf.remove",      WheelKind::Tools, L"Remove pages", Bit(Kind::Pdf), Icon::RemovePage, C::PerFile, 1, 1, Popup::Pages, RunPdfTool, Engine::Pdfium },
         { L"pdf.sign",        WheelKind::Tools, L"Sign",        Bit(Kind::Pdf), Icon::Sign, C::PerFile, 1, 1, Popup::Place, RunPdfTool, Engine::Pdfium },
         { L"pdf.fill",        WheelKind::Tools, L"Fill form",   Bit(Kind::Pdf), Icon::Form, C::PerFile, 1, 1, Popup::Place, RunPdfTool, Engine::Pdfium },
         { L"pdf.picture",     WheelKind::Tools, L"Add picture", Bit(Kind::Pdf), Icon::Picture, C::PerFile, 1, 1, Popup::Place, RunPdfTool, Engine::Pdfium },

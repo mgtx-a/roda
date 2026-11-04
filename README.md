@@ -29,7 +29,8 @@ Until the first release, test builds are on the repository's **Actions** tab.
    - **Convert**: the formats it can change into
    - **Files**: copy, move, zip, and so on
 
-   A file without tools (a Word document, say) opens on Convert instead.
+   However you open it, the wheel starts on Tools. A file without tools (a Word document, say) starts
+   on Convert instead.
 
    The names of the three wheels sit above the wheel, so you can see which one is open. You can also
    drag onto a name to switch to that wheel.
@@ -72,7 +73,11 @@ It steps aside while a game or a full-screen video is in front.
   **Tab** for the next wheel, **Enter** to go, **Esc** to cancel. You can also click the wheel's names.
 - **Wheel first, files after:** press **Ctrl+Alt+R** (or **Ctrl+Alt+M**) with nothing selected. An empty
   wheel waits at the pointer: drag files onto it and it fills with their choices. Drop on one, or drop
-  anywhere on the wheel and click a choice after. Click its centre to close it.
+  anywhere on the wheel and click a choice after. No files to drag? Click **Choose files…** under it
+  (or press **Enter**). Click its centre or press **Esc** to close it.
+
+  A wheel that already holds files takes other files dropped on it: their own choices replace the old
+  ones, and nothing runs until you click one.
 - **Without dragging at all:** right-click the wheel icon near the clock and choose **Choose files…**.
   Pick your files, and the wheel opens for them. Click a choice, or a wheel's name to switch.
 - **From a ZIP or an Outlook email:** drag a file straight out of an open ZIP folder or an email.
@@ -88,7 +93,11 @@ next to the first file.
 
 Nothing selected? Press **Ctrl+Alt+M** anyway: the wheel waits for you to drag the PDFs onto it, then
 offers **Merge PDF** (see above). In the list, drag more files in or click **Add files…**; the **✕**
-on a row takes that file out again. The list stays open while you look in Explorer.
+on a row takes that file out again. A long list scrolls (mouse wheel or arrows). The list stays open
+while you look in Explorer.
+
+**Remove pages** works on one PDF at a time: it shows that PDF's pages, so the ones you click away are
+only ever removed from it.
 
 ### Tips
 - Press **Space** **after** you start dragging, not before.
