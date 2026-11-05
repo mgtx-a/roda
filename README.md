@@ -19,8 +19,8 @@ Download it from the [latest release](https://github.com/mgtx-a/roda/releases/la
 
 | | **Full** (recommended) | **Lite** |
 |---|---|---|
-| Most PCs (Intel / AMD) | **Roda-x64-full.zip** | **Roda-x64.exe** |
-| Windows on ARM (Snapdragon) | **Roda-arm64-full.zip** | **Roda-arm64.exe** |
+| Most PCs (Intel / AMD) | **[Roda-x64-full.zip](https://github.com/mgtx-a/roda/releases/latest/download/Roda-x64-full.zip)** | **[Roda-x64.exe](https://github.com/mgtx-a/roda/releases/latest/download/Roda-x64.exe)** |
+| Windows on ARM (Snapdragon) | **[Roda-arm64-full.zip](https://github.com/mgtx-a/roda/releases/latest/download/Roda-arm64-full.zip)** | **[Roda-arm64.exe](https://github.com/mgtx-a/roda/releases/latest/download/Roda-arm64.exe)** |
 | How to start | Unzip anywhere, keep the folder together, run Roda.exe | One file: just run it |
 | Size | about 10 MB | about 2 MB |
 | Photos, documents, spreadsheets, ZIP / TAR, subtitles | ✅ | ✅ |
