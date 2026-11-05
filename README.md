@@ -28,7 +28,24 @@ Download it from the [latest release](https://github.com/mgtx-a/roda/releases/la
 | **Audio** (MP3, WAV, FLAC…) | ✅ | ❌ |
 | **Video** (MP4, trim, GIF…) | ✅ | ❌ |
 
-Not sure which PC you have? **Settings → System → About → System type** says *x64-based* or *ARM-based*.
+### x64 or ARM?
+It depends on the chip inside your PC. **Almost all Windows PCs are x64**; pick ARM only if you're sure.
+
+- **x64**: PCs with an **Intel** or **AMD** chip. Most desktops and laptops, for example any PC with an
+  Intel Core i3 / i5 / i7, Core Ultra, Pentium or Celeron, or an AMD Ryzen or Athlon chip.
+- **ARM**: newer thin laptops with a **Qualcomm Snapdragon** or **Microsoft SQ** chip, for example
+  Copilot+ PCs with Snapdragon X Plus or X Elite, Surface Pro X, and Surface Pro 11 or Surface Laptop 7
+  with Snapdragon.
+
+**Check your own PC** (takes 10 seconds):
+1. Press **Windows key + I** to open Settings.
+2. Go to **System → About** (at the bottom of the list).
+3. Under **Device specifications**, look at two lines:
+   - **Processor**: *Intel* or *AMD* means x64. *Snapdragon* or *Microsoft SQ* means ARM.
+   - **System type**: *x64-based processor* means x64. *ARM-based processor* means ARM.
+
+Picked the wrong one? Nothing breaks. On an ARM PC the x64 version still runs (Windows translates it,
+a little slower). On an x64 PC the ARM version just won't start: download the x64 one instead.
 
 Put it anywhere you like, even a USB stick. To remove Roda, just delete it (or the folder). Windows
 SmartScreen may warn that the app is unrecognised because it isn't signed: choose **More info → Run
