@@ -71,7 +71,7 @@ private:
     static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l);
     LRESULT Handle(UINT m, WPARAM w, LPARAM l);
     bool Build();                      // false when this wheel has nothing for these files
-    bool BuildFirst(WheelKind want);   // `want`, else the same order everywhere: Tools, Convert, Files
+    bool BuildFirst(WheelKind want);   // `want`, else the same order everywhere: Tools, then Convert
     void StayForClicks();              // the drag ended off the options: keep the wheel, now for clicks
     void ShowCatcher(bool on);
     void Open(double keySeenAt, bool keepCentre = false);
@@ -98,10 +98,10 @@ private:
     std::vector<Segment> segs_;
     std::vector<WheelOption> more_;  // the choices behind More…
     int hot_ = -2;
-    bool avail_[3]{};               // Convert, Tools, Files: has something for these files
-    double tabA_[3][2]{};           // the tabs along the rim: their start and end angles (clockwise from the top)
+    bool avail_[kWheels]{};         // Convert, Tools: has something for these files
+    double tabA_[kWheels][2]{};           // the tabs along the rim: their start and end angles (clockwise from the top)
     double closeA_ = 0, tabR_ = 0;  // the close cross: its angle, and the radius it sits on, DIPs
-    D2D1_RECT_F tabBox_[3]{};       // each tab, upright, DIPs from the centre
+    D2D1_RECT_F tabBox_[kWheels]{};       // each tab, upright, DIPs from the centre
     double chooseW_ = 0, chooseY_ = 0;   // the waiting wheel's Choose files… button: its width, and its middle below the centre
     bool shown_ = false, closing_ = false, dropped_ = false, dirty_ = false, keyboard_ = false;
     bool waiting_ = false;          // open with no files yet (ShowWaiting)

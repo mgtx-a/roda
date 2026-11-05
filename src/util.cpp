@@ -494,7 +494,6 @@ void Settings::Save() const
     auto flag = [&](const char* k, bool v) { j += "  \""; j += k; j += "\": "; j += v ? "true" : "false"; j += ",\n"; };
     num("keyConvert", keyConvert);
     num("keyTools", keyTools);
-    num("keyActions", keyActions);
     num("hotkeyMods", hotkeyMods);
     num("hotkeyKey", hotkeyKey);
     j += "  \"outputFolder\": "; AppendJsonString(j, outputFolder); j += ",\n";
@@ -504,10 +503,6 @@ void Settings::Save() const
     num("compressQuality", compressQuality);
     num("pdfDpi", pdfDpi);
     num("theme", theme);
-    for (size_t i = 0; i < 3; i++) {
-        std::string k = "recentFolder" + std::to_string(i + 1);
-        j += "  \""; j += k; j += "\": "; AppendJsonString(j, i < recentFolders.size() ? recentFolders[i] : wstring()); j += ",\n";
-    }
     flag("paused", paused);
     flag("explorerMenuSet", explorerMenuSet);
     flag("bubble", bubble);
@@ -527,7 +522,6 @@ Settings Settings::Load()
     std::string j(reinterpret_cast<const char*>(bytes.data()) + skip, bytes.size() - skip);
     s.keyConvert = ParseInt(j, "keyConvert", s.keyConvert);
     s.keyTools = ParseInt(j, "keyTools", s.keyTools);
-    s.keyActions = ParseInt(j, "keyActions", s.keyActions);
     s.hotkeyMods = ParseInt(j, "hotkeyMods", s.hotkeyMods);
     s.hotkeyKey = ParseInt(j, "hotkeyKey", s.hotkeyKey);
     s.outputFolder = ParseString(j, "outputFolder");
@@ -537,10 +531,6 @@ Settings Settings::Load()
     s.compressQuality = std::clamp(ParseInt(j, "compressQuality", s.compressQuality), 1, 100);
     s.pdfDpi = std::clamp(ParseInt(j, "pdfDpi", s.pdfDpi), 36, 1200);
     s.theme = std::clamp(ParseInt(j, "theme", s.theme), 0, 2);
-    for (int i = 1; i <= 3; i++) {
-        wstring f = ParseString(j, ("recentFolder" + std::to_string(i)).c_str());
-        if (!f.empty()) s.recentFolders.push_back(f);
-    }
     s.paused = ParseBool(j, "paused", s.paused);
     s.welcomed = ParseBool(j, "welcomed", s.welcomed);
     s.explorerMenuSet = ParseBool(j, "explorerMenuSet", s.explorerMenuSet);

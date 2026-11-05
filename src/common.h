@@ -112,13 +112,12 @@ HWND FullScreenAppAt(POINT p);                  // the full screen app in front 
 // ---- settings.json
 struct Settings {
     // Trigger keys, as virtual-key codes (VK_SHIFT, VK_CONTROL, VK_MENU).
-    int keyConvert = VK_SHIFT, keyTools = VK_CONTROL, keyActions = VK_MENU;
+    int keyConvert = VK_SHIFT, keyTools = VK_CONTROL;
     int hotkeyMods = MOD_CONTROL | MOD_ALT, hotkeyKey = 'R';
     wstring outputFolder;      // empty: next to the source file
     bool keepMetadata = true;
     int jpegQuality = 88, webpQuality = 82;   // conversions
     int compressQuality = 70;                 // the Compress tool's starting point, remembered
-    std::vector<wstring> recentFolders;       // "Copy to" targets, newest first, at most 3
     int pdfDpi = 300;                         // PDF pages as pictures
     int theme = 0;                            // 0 as Windows, 1 light, 2 dark
     bool paused = false;

@@ -15,9 +15,9 @@ constexpr double kRing0In = 54, kRing0Out = 150;    // up to 8 options
 constexpr double kRing1In = 156, kRing1Out = 230;   // the rest
 constexpr double kGrow = 6;                         // a hovered segment reaches out this far
 constexpr double kMargin = 30;                      // room around the disc for the shadow and the hover
-constexpr double kTabH = 24, kTabGap = 10;        // the Convert · Tools · Files tabs above the disc
+constexpr double kTabH = 24, kTabGap = 10;        // the Convert · Tools tabs above the disc
 constexpr double kTabRoom = kTabH + kTabGap + 4;
-constexpr double kTabAt[3] = { -0.9, 0, 0.9 };       // Convert, Tools, Files: their places around the top (radians from the top)
+constexpr double kTabAt[kWheels] = { -0.42, 0.42 };  // Convert, Tools: their places either side of the top (radians from the top)
 constexpr int kTabHit = -10;                        // HitTest: kTabHit - i is tab i
 constexpr int kCloseHit = -9;                       // HitTest: the close cross after the tabs
 constexpr int kChooseHit = -8;                      // HitTest: the waiting wheel's Choose files… button
@@ -298,7 +298,7 @@ bool Wheel::Build()
 bool Wheel::BuildFirst(WheelKind want)
 {
     // Whichever way the wheel opens (a drag, the hotkey, a drop on the waiting wheel), it starts the same way.
-    for (WheelKind k : { want, WheelKind::Tools, WheelKind::Convert, WheelKind::Actions }) {
+    for (WheelKind k : { want, WheelKind::Tools, WheelKind::Convert }) {
         kind_ = k;
         if (Build()) return true;
     }
@@ -314,7 +314,7 @@ void Wheel::Show(WheelKind kind, const std::vector<wstring>& paths, double keySe
     kinds_.clear();
     // Magic bytes for the first items (so a mislabelled file still gets the right wheel), the name for the rest.
     for (size_t i = 0; i < paths_.size(); i++) kinds_.push_back(i < kMagicLimit ? KindOfPath(paths_[i]) : KindFromExtension(paths_[i]));
-    for (int i = 0; i < 3; i++) avail_[i] = !OptionsFor(static_cast<WheelKind>(i), kinds_, settings_).empty();
+    for (int i = 0; i < kWheels; i++) avail_[i] = !OptionsFor(static_cast<WheelKind>(i), kinds_, settings_).empty();
     if (!BuildFirst(kind)) return;
     if (kind_ != kind) Log(L"wheel: %s has nothing for %s, so %s opens", WheelName(kind), CentreText().c_str(), WheelName(kind_));
     if (keySeenAt >= 0) ShowCatcher(true);   // opened mid-drag: below the wheel, over everything else
@@ -384,12 +384,12 @@ bool Wheel::Fill(const std::vector<wstring>& paths)
     if (paths.empty()) return false;
     std::vector<Kind> kinds;
     for (size_t i = 0; i < paths.size(); i++) kinds.push_back(i < kMagicLimit ? KindOfPath(paths[i]) : KindFromExtension(paths[i]));
-    bool avail[3], any = false;
-    for (int i = 0; i < 3; i++) { avail[i] = !OptionsFor(static_cast<WheelKind>(i), kinds, settings_).empty(); any = any || avail[i]; }
+    bool avail[kWheels], any = false;
+    for (int i = 0; i < kWheels; i++) { avail[i] = !OptionsFor(static_cast<WheelKind>(i), kinds, settings_).empty(); any = any || avail[i]; }
     if (!any) return false;
     paths_ = paths;
     kinds_ = std::move(kinds);
-    for (int i = 0; i < 3; i++) avail_[i] = avail[i];
+    for (int i = 0; i < kWheels; i++) avail_[i] = avail[i];
     BuildFirst(WheelKind::Tools);
     waiting_ = false;
     incoming_ = false;
@@ -469,7 +469,7 @@ void Wheel::Fit()
     int disc = int(std::lround((outer + kGrow) * scale_));
     POINT c = centre_;
     int top = disc + int(std::lround(kTabRoom * scale_));   // the tabs stay on the screen too
-    int side = top;   // Convert and Files on the sides stay on the screen too
+    int side = top;   // the tabs either side of the top stay on the screen too
     c.x = std::clamp<LONG>(c.x, mon.work.left + side, std::max<LONG>(mon.work.left + side, mon.work.right - side));
     int bottom = waiting_ ? top : disc;   // a waiting wheel's Choose files… sits below it
     c.y = std::clamp<LONG>(c.y, mon.work.top + top, std::max<LONG>(mon.work.top + top, mon.work.bottom - bottom));
@@ -503,11 +503,8 @@ void Wheel::Switch(WheelKind kind)
 
 void Wheel::Next(bool back)
 {
-    for (int step = 1; step <= 2; step++) {
-        WheelKind before = kind_;
-        Switch(static_cast<WheelKind>((int(kind_) + (back ? 3 - step : step)) % 3));
-        if (kind_ != before) break;
-    }
+    (void)back;   // two wheels: on or back is the same one
+    Switch(kind_ == WheelKind::Tools ? WheelKind::Convert : WheelKind::Tools);
 }
 
 void Wheel::Hide(bool animated)
@@ -540,7 +537,7 @@ int Wheel::HitTest(POINT p) const
     if (tabR_ > 0) {
         D2D1_POINT_2F x = Polar(0, 0, tabR_, closeA_);
         if (std::hypot(dx - x.x, dy - x.y) <= kTabH / 2 + 3) return kCloseHit;
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < kWheels; i++)
             if (avail_[i] && dx >= tabBox_[i].left - 3 && dx <= tabBox_[i].right + 3 && dy >= tabBox_[i].top - 3 && dy <= tabBox_[i].bottom + 3) return kTabHit - i;
     }
     if (waiting_ && chooseW_ > 0 && std::abs(dx) <= chooseW_ / 2 + 3 && std::abs(dy - chooseY_) <= kTabH / 2 + 3) return kChooseHit;
@@ -763,18 +760,18 @@ void Wheel::Draw()
         rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), R - 2, R - 2), surf_.Solid(WithAlpha(th.accent, inv)), 3.0f);
     }
 
-    // The tabs: every wheel by name, so nobody has to guess what Space or Tab does next. They sit on the
-    // rim, turned with it: Convert left, Tools on top, Files right. Faint arcs between them say Tab; a
-    // cross after Files closes the wheel.
+    // The tabs: both wheels by name, so nobody has to guess what Space or Tab does next. Upright, either
+    // side of the top: Convert left, Tools right. A faint arc between them says Tab; a cross after Tools
+    // closes the wheel.
     D2D1_MATRIX_3X2_F base;
     rt->GetTransform(&base);
     auto turn = [&](double a) { rt->SetTransform(D2D1::Matrix3x2F::Rotation(float(a * 180 / kPi), D2D1::Point2F(c, c)) * base); };   // drawn at the top, turned into place
-    float tw[3], gap = 6;
-    for (int i = 0; i < 3; i++) tw[i] = surf_.MeasureText(WheelName(WheelKind(i)), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 22;
+    float tw[kWheels], gap = 6;
+    for (int i = 0; i < kWheels; i++) tw[i] = surf_.MeasureText(WheelName(WheelKind(i)), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD) + 22;
     tabR_ = R + kTabGap + kTabH / 2;
     float tr = float(tabR_), h2 = float(kTabH / 2);
     rt->SetTransform(base);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < kWheels; i++) {
         // Upright, so they read at a glance; each just clear of the disc, wherever it sits around the top.
         double a = kTabAt[i], sa = std::fabs(std::sin(a)), ca = std::fabs(std::cos(a));
         double r = R + kTabGap + sa * tw[i] / 2 + ca * h2;
@@ -794,7 +791,7 @@ void Wheel::Draw()
         }
         surf_.DrawText(WheelName(WheelKind(i)), 12, DWRITE_FONT_WEIGHT_SEMI_BOLD, D2D1::RectF(box.left + 11, box.top + 4, box.right, box.bottom), ink);
     }
-    closeA_ = tabA_[2][1] + (gap + h2) / tabR_;
+    closeA_ = tabA_[kWheels - 1][1] + (gap + h2) / tabR_;
     if (waiting_) {
         // Choose files…: for when dragging isn't handy. Below the disc, where the tabs would be.
         const wchar_t* say = L"Choose files…";
@@ -813,7 +810,7 @@ void Wheel::Draw()
         rt->SetTransform(base);   // the arc and its heads are drawn where they are; only the letters turn
         uint32_t col = WithAlpha(th.dim, 0.7);
         ID2D1SolidColorBrush* ink = surf_.Solid(col);
-        for (int pair = 0; pair < 2; pair++) {   // Convert to Tools, Tools to Files
+        for (int pair = 0; pair < kWheels - 1; pair++) {   // Convert to Tools
             rt->SetTransform(base);
             double e0 = tabA_[pair][1] + 0.07, e1 = tabA_[pair + 1][0] - 0.07, mid = (e0 + e1) / 2;
             const wchar_t* word = L"Tab";

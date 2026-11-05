@@ -168,8 +168,8 @@ void Trigger::Moved(POINT p)
                     break;
                 }
                 // A drag may have started. Keys already held now (Shift+drag to move) are not a trigger press.
-                int keys[3] = { settings_.keyConvert, settings_.keyTools, settings_.keyActions };
-                for (int i = 0; i < 3; i++) keyWasDown_[i] = (GetAsyncKeyState(keys[i]) & 0x8000) != 0;
+                int keys[kWheels] = { settings_.keyConvert, settings_.keyTools };
+                for (int i = 0; i < kWheels; i++) keyWasDown_[i] = (GetAsyncKeyState(keys[i]) & 0x8000) != 0;
                 spaceWasDown_ = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
                 tabWasDown_ = (GetAsyncKeyState(VK_TAB) & 0x8000) != 0;
                 // The window the button went down on: its thread starts the drag, if anyone does.
@@ -282,9 +282,9 @@ void Trigger::Tick()
 
 void Trigger::CheckKeys()
 {
-    int keys[3] = { settings_.keyConvert, settings_.keyTools, settings_.keyActions };
+    int keys[kWheels] = { settings_.keyConvert, settings_.keyTools };
     int pressed = -1;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < kWheels; i++) {
         bool down = (GetAsyncKeyState(keys[i]) & 0x8000) != 0;
         if (down && !keyWasDown_[i]) pressed = i;
         keyWasDown_[i] = down;

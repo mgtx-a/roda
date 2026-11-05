@@ -25,14 +25,13 @@ Until the first release, test builds are on the repository's **Actions** tab.
 1. Double-click `Roda.exe`. A small wheel icon appears near the clock.
 2. Start dragging a file, as if you were moving it.
 3. While still holding the mouse button, press **Space**. A wheel of tools opens: smaller, resized,
-   cropped, rotated, pages removed... (Tools). Press **Space** or **Tab** again for the next wheel:
-   - **Convert**: the formats it can change into
-   - **Files**: copy, move, zip, and so on
+   cropped, rotated, pages removed... (Tools). Press **Space** or **Tab** again for the other wheel,
+   **Convert**: the formats it can change into, and ZIP.
 
    However you open it, the wheel starts on Tools. A file without tools (a Word document, say) starts
    on Convert instead.
 
-   The names of the three wheels sit above the wheel, so you can see which one is open. You can also
+   The names of the two wheels sit above the wheel, so you can see which one is open. You can also
    drag onto a name to switch to that wheel.
 4. Let go of the mouse on the choice you want. Some choices, like **Resize…**, **Crop** or **Trim**,
    then open a small panel to finish. It shows where the result will be saved.
@@ -52,9 +51,9 @@ nothing happens to the file: the wheel stays open, so click a choice, or click e
 The first time you start Roda, a short tour shows you how it works. It has a **Practice file** button
 that gives you a picture to try it on.
 
-Space is safe: if the wheel doesn't open, the file just drops back where it was. (Shift, Ctrl and Alt
-still open the Convert, Tools and Files wheels too, but Windows also uses them while you drag: a drop
-with Ctrl held makes a copy, with Shift a move, with Alt a shortcut.)
+Space is safe: if the wheel doesn't open, the file just drops back where it was. (Shift and Ctrl
+still open the Convert and Tools wheels too, but Windows also uses them while you drag: a drop with
+Ctrl held makes a copy, with Shift a move.)
 
 ### The floating button
 A small round Roda button floats at the side of the screen, half see-through until the pointer comes.
@@ -119,7 +118,9 @@ only ever removed from it.
 | **Audio** \* (MP3, M4A, WAV, FLAC, OGG, Opus, AIFF, WMA) | Each other | Cut a part, make smaller, join several |
 | **Video** \* (MP4, MOV, MKV, WebM, AVI, WMV, GIF) | Each other, or GIF, or just the sound | Cut a part, make smaller, mute, 1080p / 720p / 480p, crop |
 | **ZIP and TAR files** | | Unpack into a folder |
-| **Anything** | | Copy to, Move to, make a ZIP, copy the file's path, open a terminal here, pin a picture on top of your screen |
+| **Anything, folders too** | ZIP, TAR.GZ, TAR | |
+
+Pictures, PDFs and videos also have **Float** (Tools): a small window that stays on top of your screen.
 
 \* Full version only.
 
@@ -170,7 +171,7 @@ files never leave your computer.
 What Roda does on your PC, in plain words:
 
 - **Mouse and keys:** it notices when you start dragging a file, and only then checks for
-  Space, Tab, Shift, Ctrl, Alt and Esc. It doesn't record your typing.
+  Space, Tab, Shift, Ctrl and Esc. It doesn't record your typing.
 - **Your files:** it reads the files you drop on the wheel and saves the new file next to them (or in
   the folder you chose). Each job runs as its own small helper process, so one broken file can't crash
   Roda.
@@ -192,7 +193,7 @@ What Roda does on your PC, in plain words:
   one PDF**), under `HKEY_CURRENT_USER\Software\Classes\*\shell\Roda`, `...\Directory\shell\Roda` and
   `...\SystemFileAssociations\<type>\shell\RodaMerge`. They're on from the first start; turning them off
   in Settings removes them. Roda only reads two things: your light/dark setting, and whether Office is installed.
-- **Clipboard:** only used when you choose *Copy path*.
+- **Clipboard:** only read when you paste text into a PDF (Ctrl+V).
 
 ## For developers
 

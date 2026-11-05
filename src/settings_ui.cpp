@@ -10,9 +10,9 @@ constexpr double kW = 540, kPad = 24, kTop = 64, kRowH = 44, kLabelW = 190;
 constexpr double kCtlX = kPad + kLabelW, kCtlW = kW - kPad - kCtlX;
 constexpr double kShadow = 26;   // room around the card for its shadow
 
-enum Row { RConvert, RTools, RActions, RHotkey, RSave, RFolder, RJpeg, RWebp, RDpi, RMeta, RTheme, RStartup, RExplorer, RCount };
+enum Row { RConvert, RTools, RHotkey, RSave, RFolder, RJpeg, RWebp, RDpi, RMeta, RTheme, RStartup, RExplorer, RCount };
 
-const wchar_t* kLabels[RCount] = { L"Convert wheel key", L"Tools wheel key", L"Files wheel key", L"Hotkey for selected files",
+const wchar_t* kLabels[RCount] = { L"Convert wheel key", L"Tools wheel key", L"Hotkey for selected files",
                                    L"Save results", L"Folder", L"JPEG quality", L"WebP quality", L"PDF pages as pictures",
                                    L"Photo info (EXIF)", L"Look", L"Start with Windows", L"Right-click in Explorer" };
 
@@ -23,7 +23,7 @@ const int kDpis[3] = { 150, 300, 600 };
 std::vector<const wchar_t*> Choices(int row)
 {
     switch (row) {
-        case RConvert: case RTools: case RActions: return { L"Shift", L"Ctrl", L"Alt" };
+        case RConvert: case RTools: return { L"Shift", L"Ctrl", L"Alt" };
         case RSave: return { L"Next to the file", L"In one folder" };
         case RDpi: return { L"150 DPI", L"300 DPI", L"600 DPI" };
         case RMeta: return { L"Keep", L"Remove" };
@@ -154,12 +154,12 @@ void SettingsWindow::Click(const Hit& h, double x)
     if (h.row == 100) { ShowWindow(hwnd_, SW_HIDE); shown_ = false; surf_.Release(); return; }
     if (h.row < 0) return;
     int c = h.choice;
-    int* keys[3] = { &s_.keyConvert, &s_.keyTools, &s_.keyActions };
+    int* keys[2] = { &s_.keyConvert, &s_.keyTools };
     switch (h.row) {
-        case RConvert: case RTools: case RActions: {
+        case RConvert: case RTools: {
             // Each wheel has its own key: picking one another wheel uses swaps them.
             int row = h.row - RConvert, want = kTriggerKeys[std::clamp(c, 0, 2)];
-            for (int i = 0; i < 3; i++) if (i != row && *keys[i] == want) *keys[i] = *keys[row];
+            for (int i = 0; i < 2; i++) if (i != row && *keys[i] == want) *keys[i] = *keys[row];
             *keys[row] = want;
             if (onKeysChanged) onKeysChanged();
             break;
@@ -259,7 +259,7 @@ void SettingsWindow::Draw()
     rt->DrawLine(D2D1::Point2F(cc.x - 5, cc.y - 5), D2D1::Point2F(cc.x + 5, cc.y + 5), surf_.Solid(th.text), 1.4f);
     rt->DrawLine(D2D1::Point2F(cc.x - 5, cc.y + 5), D2D1::Point2F(cc.x + 5, cc.y - 5), surf_.Solid(th.text), 1.4f);
 
-    int* keys[3] = { &s_.keyConvert, &s_.keyTools, &s_.keyActions };
+    int* keys[2] = { &s_.keyConvert, &s_.keyTools };
     bool startup = startupOn && startupOn();
     for (int row = 0; row < RCount; row++) {
         float y = T + float(kTop + row * kRowH);
@@ -271,8 +271,8 @@ void SettingsWindow::Draw()
         if (!choices.empty()) {
             int selected = 0;
             switch (row) {
-                case RConvert: case RTools: case RActions:
-                    selected = -1;   // another key, set in settings.json: none of the three
+                case RConvert: case RTools:
+                    selected = -1;   // another key, set in settings.json: none of these
                     for (int i = 0; i < 3; i++) if (*keys[row - RConvert] == kTriggerKeys[i]) selected = i;
                     break;
                 case RSave: selected = s_.outputFolder.empty() ? 0 : 1; break;

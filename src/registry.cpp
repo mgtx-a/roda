@@ -8,8 +8,7 @@ const wchar_t* WheelName(WheelKind k)
 {
     switch (k) {
         case WheelKind::Convert: return L"Convert";
-        case WheelKind::Tools: return L"Tools";
-        default: return L"Files";
+        default: return L"Tools";
     }
 }
 
@@ -257,20 +256,14 @@ const std::vector<Converter>& Converters()
         { L"media.crop",      WheelKind::Tools, L"Crop",        kVideo, Icon::Crop, C::PerFile, 1, 1, Popup::Crop, RunMedia, Engine::Ffmpeg },
         { L"media.merge",     WheelKind::Tools, L"Join",        kAudio, Icon::Merge, C::AllInOne, 2, 0, Popup::None, RunMedia, Engine::Ffmpeg },
 
-        // Actions: anything, folders and mixed selections included. Run by the UI, except packing.
-        { L"act.copyto",   WheelKind::Actions, L"Copy to…",  kAnything, Icon::Copy, C::Action, 1, 0, Popup::None, nullptr },
-        { L"act.moveto",   WheelKind::Actions, L"Move to…",  kAnything, Icon::Move, C::Action, 1, 0, Popup::None, nullptr },
-        // A recent "Copy to" folder: one segment per folder, added below.
-        { L"act.copyrecent", WheelKind::Actions, L"",        kAnything, Icon::Folder, C::Action, 1, 0, Popup::None, nullptr },
-        { L"act.copypath", WheelKind::Actions, L"Copy path", kAnything, Icon::Path, C::Action, 1, 0, Popup::None, nullptr },
-        { L"act.terminal", WheelKind::Actions, L"Terminal",  kAnything, Icon::Terminal, C::Action, 1, 0, Popup::None, nullptr },
-        { L"act.float",    WheelKind::Actions, L"Float",     kImages | Bit(Kind::Pdf) | kVideo, Icon::Float, C::Action, 1, 1, Popup::None, nullptr },
-        { L"pack.zip",     WheelKind::Actions, L"ZIP",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
-        { L"pack.targz",   WheelKind::Actions, L"TAR.GZ",    kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
-        { L"pack.tar",     WheelKind::Actions, L"TAR",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
-        // Not on any wheel (accepts nothing): a downscaled PNG for Float and the crop popup.
-        { L"prep.fields",  WheelKind::Actions, L"", 0, Icon::None, C::PerFile, 1, 1, Popup::None, RunPdfTool },
-        { L"prep.preview", WheelKind::Actions, L"", 0, Icon::None, C::PerFile, 1, 1, Popup::None, RunPreview },
+        // Packing: anything, folders and mixed selections included; a change of format, so on Convert.
+        { L"pack.zip",     WheelKind::Convert, L"ZIP",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
+        { L"pack.targz",   WheelKind::Convert, L"TAR.GZ",    kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
+        { L"pack.tar",     WheelKind::Convert, L"TAR",       kAnything, Icon::Archive, C::AllInOne, 1, 0, Popup::None, RunPack },
+        // Float: a picture, PDF or video in a small window that stays on top. Run by the UI.
+        { L"act.float",    WheelKind::Tools,   L"Float",     kImages | Bit(Kind::Pdf) | kVideo, Icon::Float, C::Action, 1, 1, Popup::None, nullptr },
+        { L"prep.fields",  WheelKind::Hidden, L"", 0, Icon::None, C::PerFile, 1, 1, Popup::None, RunPdfTool },
+        { L"prep.preview", WheelKind::Hidden, L"", 0, Icon::None, C::PerFile, 1, 1, Popup::None, RunPreview },
     };
     return table;
 }
@@ -331,13 +324,6 @@ std::vector<WheelOption> OptionsFor(WheelKind wheel, const std::vector<Kind>& ki
         if (wheel == WheelKind::Convert && allSame) {
             Kind target = KindFromExtension(wstring(L"x.") + (c.id + 3));
             if (target == kinds[0]) continue;
-        }
-        if (wcscmp(c.id, L"act.copyrecent") == 0) {
-            for (auto& folder : settings.recentFolders) {
-                if (folder.empty()) continue;
-                out.push_back({ &c, L"→ " + FileName(folder.back() == L'\\' ? folder.substr(0, folder.size() - 1) : folder), folder, c.icon });
-            }
-            continue;
         }
         out.push_back({ &c, c.label, L"", c.icon });
     }

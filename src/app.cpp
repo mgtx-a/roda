@@ -429,12 +429,7 @@ struct App {
         cards.AnchorAt(at);
         wstring id = c->id;
         if (c->mode == Converter::Action) {
-            if (id == L"act.copyto") CopyOrMove(paths, L"", false, settings, cards);
-            else if (id == L"act.moveto") CopyOrMove(paths, L"", true, settings, cards);
-            else if (id == L"act.copyrecent") CopyOrMove(paths, o.arg, false, settings, cards);
-            else if (id == L"act.copypath") CopyPaths(paths, cards);
-            else if (id == L"act.terminal") OpenTerminal(paths, cards);
-            else if (id == L"act.float") {
+            if (id == L"act.float") {
                 wstring original = paths[0];
                 Preview(original, 2048, [this, original, at](const wstring& png, int w, int h) {
                     auto f = std::make_unique<FloatCard>(original, png, w, h, at);
