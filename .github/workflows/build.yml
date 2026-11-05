@@ -78,11 +78,13 @@ jobs:
           mkdir -p dist
           for arch in x64 arm64; do
             cp out/$arch/Roda.exe dist/Roda-$arch.exe
-            # Full: the same exe, plus PDFium in engines\, the licences and the README.
-            full=staging/Roda-$arch
+            # Full: one Roda folder, so unzipping doesn't scatter files. In it only what's needed: the exe,
+            # the engines (PDFium, FFmpeg), and the licences they must ship with (THIRD_PARTY.md among them).
+            full=staging/Roda-$arch/Roda
             mkdir -p $full
-            cp -r out/$arch/Roda.exe out/$arch/engines licenses README.md THIRD_PARTY.md $full/
-            powershell -Command "Compress-Archive -Path '$full\*' -DestinationPath 'dist\Roda-$arch-full.zip' -Force"
+            cp -r out/$arch/Roda.exe out/$arch/engines licenses $full/
+            cp THIRD_PARTY.md $full/licenses/
+            powershell -Command "Compress-Archive -Path 'staging\Roda-$arch\Roda' -DestinationPath 'dist\Roda-$arch-full.zip' -Force"
           done
           {
             echo "sums<<EOF"
@@ -115,7 +117,7 @@ jobs:
           |---|---|---|
           | Most PCs (Intel / AMD) | **Roda-x64-full.zip** | **Roda-x64.exe** |
           | Windows on ARM (Snapdragon) | **Roda-arm64-full.zip** | **Roda-arm64.exe** |
-          | How to start | Unzip anywhere, keep the folder together, run Roda.exe | One file: just run it |
+          | How to start | Unzip it: you get one **Roda** folder. Open it and run **Roda.exe** (keep the folder together) | One file: just run it |
           | Size | about 10 MB | about 2 MB |
           | Photos, documents, spreadsheets, ZIP / TAR, subtitles | ✅ | ✅ |
           | **PDFs** (to Word, sign, merge, remove pages…) | ✅ | ❌ |
