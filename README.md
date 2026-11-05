@@ -8,18 +8,31 @@ choice and Roda does the rest. Everything happens on your own computer: nothing 
 
 Works on Windows 10 and 11. No installing, no admin rights, no account.
 
-> Roda is still being tested and has no official release yet.
+![The wheel for a photo: Tools on the left (Compress, Resize, Crop, Rotate...), Convert on the right (PNG, WebP, PDF, ZIP...)](docs/wheel.png)
+
+*The wheel for a photo. Left: Tools. Right: Convert, one press of Tab away.*
 
 ## Get it
-There are two versions:
+Download it from the [latest release](https://github.com/mgtx-a/roda/releases/latest).
 
-- **Full** (a zip, about 23 MB once unzipped): does everything, including PDFs, audio and video.
-- **Lite** (one file, under 2.2 MB): everything except PDFs, audio and video.
+### Which file do I download?
 
-Unzip it anywhere you like, even a USB stick, and double-click `Roda.exe`. To remove Roda, just delete
-the folder.
+| | **Full** (recommended) | **Lite** |
+|---|---|---|
+| Most PCs (Intel / AMD) | **Roda-x64-full.zip** | **Roda-x64.exe** |
+| Windows on ARM (Snapdragon) | **Roda-arm64-full.zip** | **Roda-arm64.exe** |
+| How to start | Unzip anywhere, keep the folder together, run Roda.exe | One file: just run it |
+| Size | about 10 MB | about 2 MB |
+| Photos, documents, spreadsheets, ZIP / TAR, subtitles | ✅ | ✅ |
+| **PDFs** (to Word, sign, merge, remove pages…) | ✅ | ❌ |
+| **Audio** (MP3, WAV, FLAC…) | ✅ | ❌ |
+| **Video** (MP4, trim, GIF…) | ✅ | ❌ |
 
-Until the first release, test builds are on the repository's **Actions** tab.
+Not sure which PC you have? **Settings → System → About → System type** says *x64-based* or *ARM-based*.
+
+Put it anywhere you like, even a USB stick. To remove Roda, just delete it (or the folder). Windows
+SmartScreen may warn that the app is unrecognised because it isn't signed: choose **More info → Run
+anyway**.
 
 ## How to use it
 1. Double-click `Roda.exe`. A small wheel icon appears near the clock.
