@@ -45,3 +45,14 @@ void SetOwnDrag(bool on);
 bool OwnDrag();
 
 }  // namespace rd
+
+namespace rd {
+
+/// Drags one file from Roda (the tour's practice picture), on a thread of its own: Roda's loop keeps
+/// running, so the wheel opens and draws as for any other drag. Copy only, so the file never moves.
+/// When the drag ends, `notify` gets `msg` (wParam: the HRESULT, lParam: the effect).
+void DragFileAsync(const wstring& path, HWND notify, UINT msg);
+/// The thread running that drag (0 if none): the trigger looks there for OLE's capture window.
+DWORD DragSourceThread();
+
+}  // namespace rd

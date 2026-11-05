@@ -31,6 +31,9 @@ public:
     // Called by the probe's drop target.
     void OnProbeEnter(IDataObject* data);
 
+    /// Files are being dragged right now (the tour reacts to it).
+    bool fileDrag() const { return state_ == State::FileDrag; }
+
 private:
     enum class State { Idle, Pressed, Watching, Probing, FileDrag, Ignored };
 

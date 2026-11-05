@@ -91,6 +91,8 @@ public:
     void FillMips(const Mips& m, const D2D1_RECT_F& dest, float radius, float opacity = 1.0f, bool cover = false);
     /// Text, left/top aligned inside rect.
     void DrawText(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight, const D2D1_RECT_F& rect, uint32_t argb);
+    /// Text that wraps onto more lines within the rect's width (clipped to its height); returns the height used.
+    float DrawWrapped(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight, const D2D1_RECT_F& rect, uint32_t argb);
     float MeasureText(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight);
 
 private:

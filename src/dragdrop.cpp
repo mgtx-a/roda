@@ -1,11 +1,73 @@
 #include "dragdrop.h"
 
+#include <atomic>
+#include <shobjidl.h>
+#include <thread>
+
 namespace rd {
 
 static bool g_ownDrag = false;
 
 void SetOwnDrag(bool on) { g_ownDrag = on; }
 bool OwnDrag() { return g_ownDrag; }
+
+// ---------------------------------------------------------------- dragging a file out
+
+static std::atomic<DWORD> g_dragThread{ 0 };
+
+DWORD DragSourceThread() { return g_dragThread.load(); }
+
+namespace {
+
+/// The drag goes on while the left button is held; Esc cancels. Windows draws the pointer.
+class DropSource : public IDropSource {
+    LONG ref_ = 1;
+public:
+    STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override
+    {
+        if (riid == IID_IUnknown || riid == IID_IDropSource) { *ppv = static_cast<IDropSource*>(this); AddRef(); return S_OK; }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+    STDMETHODIMP_(ULONG) AddRef() override { return ULONG(InterlockedIncrement(&ref_)); }
+    STDMETHODIMP_(ULONG) Release() override { ULONG r = ULONG(InterlockedDecrement(&ref_)); if (!r) delete this; return r; }
+    STDMETHODIMP QueryContinueDrag(BOOL escape, DWORD keys) override
+    {
+        if (escape) return DRAGDROP_S_CANCEL;
+        return (keys & MK_LBUTTON) ? S_OK : DRAGDROP_S_DROP;
+    }
+    STDMETHODIMP GiveFeedback(DWORD) override { return DRAGDROP_S_USEDEFAULTCURSORS; }
+};
+
+}  // namespace
+
+void DragFileAsync(const wstring& path, HWND notify, UINT msg)
+{
+    // DoDragDrop runs its own loop until the drop. On Roda's thread that loop would stop the frames and
+    // timers the wheel needs, so it runs here instead, exactly as another app's drag would.
+    std::thread([path, notify, msg] {
+        g_dragThread = GetCurrentThreadId();
+        HRESULT hr = OleInitialize(nullptr);
+        DWORD effect = DROPEFFECT_NONE;
+        if (SUCCEEDED(hr)) {
+            // The shell's own data object for the file: the paths, and the picture Windows shows under the pointer.
+            Com<IShellItem> item;
+            Com<IDataObject> data;
+            hr = SHCreateItemFromParsingName(path.c_str(), nullptr, IID_PPV_ARGS(item.Put()));
+            if (SUCCEEDED(hr)) hr = item->BindToHandler(nullptr, BHID_DataObject, IID_PPV_ARGS(data.Put()));
+            if (SUCCEEDED(hr)) {
+                auto* source = new DropSource();
+                hr = DoDragDrop(data.Get(), source, DROPEFFECT_COPY, &effect);
+                source->Release();
+            }
+            data.Reset();
+            item.Reset();
+            OleUninitialize();
+        }
+        g_dragThread = 0;
+        PostMessageW(notify, msg, WPARAM(hr), LPARAM(effect));
+    }).detach();
+}
 
 static CLIPFORMAT Descriptor() { static CLIPFORMAT f = CLIPFORMAT(RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW)); return f; }
 static CLIPFORMAT Contents() { static CLIPFORMAT f = CLIPFORMAT(RegisterClipboardFormatW(CFSTR_FILECONTENTS)); return f; }

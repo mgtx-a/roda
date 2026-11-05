@@ -754,6 +754,22 @@ void Wheel::Draw()
         }
     }
     if (twoRings) rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), float(kRing0Out + 3), float(kRing0Out + 3)), surf_.Solid(th.sep), 1.0f);
+    bool guiding = false;
+    if (!guide_.empty() && !closing_) {
+        // The tour's pointer: the choice it asks for breathes, so it's found at a glance.
+        for (size_t i = 0; i < segs_.size(); i++) {
+            const auto& sg = segs_[i];
+            if (!sg.opt.conv || guide_ != sg.opt.conv->id || hot_ == int(i)) continue;
+            double rIn = sg.ring == 0 ? kRing0In : kRing1In, rOut = sg.ring == 0 ? kRing0Out : kRing1Out;
+            float beat = ReducedMotion() ? 1.0f : float(0.5 + 0.5 * std::sin(Now() * 5));
+            auto geo = Sector(c, c, rIn + 3, rOut - 1, sg.a0 + 0.02, sg.a1 - 0.02);
+            if (geo) {
+                rt->FillGeometry(geo.Get(), surf_.Solid(WithAlpha(th.accent, 0.12 + 0.18 * beat)));
+                rt->DrawGeometry(geo.Get(), surf_.Solid(WithAlpha(th.accent, 0.55 + 0.45 * beat)), 2.5f);
+            }
+            guiding = !ReducedMotion();
+        }
+    }
     if (incoming_) {   // the old choices fade back: these files get their own
         float inv = float(std::clamp(invite_.value, 0.0, 1.0));
         rt->FillEllipse(D2D1::Ellipse(D2D1::Point2F(c, c), R, R), surf_.Solid(WithAlpha(th.glass | 0xFF000000, 0.75 * inv)));
@@ -877,6 +893,7 @@ void Wheel::Draw()
 
     surf_.End();
     Present();
+    if (guiding) { dirty_ = true; RequestFrame(); }   // keeps breathing
     if (keySeenAt_ >= 0) {
         Log(L"wheel: first frame on screen %.1f ms after the key was seen", (Now() - keySeenAt_) * 1000);
         keySeenAt_ = -1;

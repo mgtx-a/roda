@@ -41,6 +41,10 @@ public:
 
     bool shown() const { return shown_; }
     bool open() const { return shown_ && !closing_; }   // shown and not on its way out
+    /// Open with files, waiting for a click: let go off the choices, or opened from the keyboard.
+    bool stranded() const { return open() && keyboard_ && !waiting_; }
+    /// The tour: this choice (a converter id) glows wherever it's on the wheel. Empty: none.
+    void SetGuide(const wstring& id) { guide_ = id; dirty_ = true; }
     WheelKind kind() const { return kind_; }
     POINT centre() const { return centre_; }
     int opens() const { return opens_; }      // wheels opened so far
@@ -97,6 +101,7 @@ private:
     std::vector<Kind> kinds_;
     std::vector<Segment> segs_;
     std::vector<WheelOption> more_;  // the choices behind More…
+    wstring guide_;                  // the choice the tour points at
     int hot_ = -2;
     bool avail_[kWheels]{};         // Convert, Tools: has something for these files
     double tabA_[kWheels][2]{};           // the tabs along the rim: their start and end angles (clockwise from the top)

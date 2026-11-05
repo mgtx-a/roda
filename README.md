@@ -78,8 +78,11 @@ To cancel: press **Esc**, or let go in the middle of the wheel. Let go anywhere 
 nothing happens to the file: the wheel stays open, so click a choice, or click elsewhere to close it. To stop a job that's running, click the
 **×** on its card.
 
-The first time you start Roda, a short tour shows you how it works. It has a **Practice file** button
-that gives you a picture to try it on.
+The first time you start Roda, a short tour teaches it by doing. A practice picture sits on the tour
+card: drag it straight off the card while a small demo shows each move. The tour answers what you do
+(pressed Space too early, let go off the wheel...), makes the choice it asks for glow on the wheel, and
+points you to the new file. It takes under a minute; **Skip** or **End tour** leave it at any time. Take
+it again from the menu of the Roda icon near the clock (**Take the tour**).
 
 Space is safe: if the wheel doesn't open, the file just drops back where it was. (Shift and Ctrl
 still open the Convert and Tools wheels too, but Windows also uses them while you drag: a drop with
@@ -201,7 +204,8 @@ files never leave your computer.
 What Roda does on your PC, in plain words:
 
 - **Mouse and keys:** it notices when you start dragging a file, and only then checks for
-  Space, Tab, Shift, Ctrl and Esc. It doesn't record your typing.
+  Space, Tab, Shift, Ctrl and Esc. During the tour's first step it also checks Space, to say if it was
+  pressed too early. It doesn't record your typing.
 - **Your files:** it reads the files you drop on the wheel and saves the new file next to them (or in
   the folder you chose). Each job runs as its own small helper process, so one broken file can't crash
   Roda.

@@ -209,6 +209,11 @@ void Trigger::CheckCapture()
     // the same move a moment after Roda does), so this is asked again on each move and tick.
     GUITHREADINFO gti{ sizeof gti };
     HWND cap = GetGUIThreadInfo(srcThread_, &gti) ? gti.hwndCapture : nullptr;
+    if (!cap && DragSourceThread()) {
+        // Roda's own drag (the tour's practice picture) runs on a thread of its own.
+        GUITHREADINFO own{ sizeof own };
+        if (GetGUIThreadInfo(DragSourceThread(), &own)) cap = own.hwndCapture;
+    }
     if (!cap) {
         // Desktop icons and some sources run the drag on another thread than the window under
         // the pointer, so also ask about the thread in front.

@@ -438,6 +438,19 @@ void Surface::DrawText(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weigh
     rt_->DrawText(text, UINT32(wcslen(text)), fmt, rect, Solid(argb), D2D1_DRAW_TEXT_OPTIONS_NONE);
 }
 
+float Surface::DrawWrapped(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight, const D2D1_RECT_F& rect, uint32_t argb)
+{
+    IDWriteTextFormat* fmt = TextFormat(size, weight);
+    if (!fmt) return 0;
+    Com<IDWriteTextLayout> layout;
+    if (FAILED(DWrite()->CreateTextLayout(text, UINT32(wcslen(text)), fmt, rect.right - rect.left, rect.bottom - rect.top, layout.Put()))) return 0;
+    layout->SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP);
+    rt_->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout.Get(), Solid(argb), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+    DWRITE_TEXT_METRICS m{};
+    layout->GetMetrics(&m);
+    return m.height;
+}
+
 float Surface::MeasureText(const wchar_t* text, float size, DWRITE_FONT_WEIGHT weight)
 {
     IDWriteTextFormat* fmt = TextFormat(size, weight);

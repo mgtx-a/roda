@@ -138,6 +138,7 @@ struct App {
     PlaceWindow placeUi;
     Tour tour;
     int choices = 0;   // options chosen so far (the tour watches it)
+    int made = 0;      // files made so far (the tour watches it)
     std::vector<std::unique_ptr<FloatCard>> floats;
     std::unique_ptr<Bubble> bubble;    // the floating button, while it's switched on
     std::map<int, std::function<void(const JobState&)>> waiting;   // quiet jobs (previews): who wants the result
@@ -177,6 +178,8 @@ struct App {
         settingsUi.explorerMenuOn = [] { return ExplorerMenuOn(); };
         settingsUi.setExplorerMenu = [](bool on) { if (on != ExplorerMenuOn()) SetExplorerMenu(on); };
         tour.onPractice = [this] { Practice(); };
+        tour.practiceFile = [this] { return PracticeFile(); };
+        tour.onGuide = [this](const wchar_t* id) { wheel.SetGuide(id ? id : L""); };
         tour.onFinished = [this] { if (!settings.welcomed) { settings.welcomed = true; settings.Save(); } };
         // First run: the tour, once things have settled.
         if (!settings.welcomed && !TestMode()) After(1.5, [this] { StartTour(); });
@@ -194,6 +197,7 @@ struct App {
         jobs.onChange = [this](const JobState& s) {
             if (!s.quiet) {
                 cards.Update(s);
+                if (s.phase == JobState::Done) made++;
                 if (s.phase == JobState::Done || s.phase == JobState::Failed) {
                     recent.insert(recent.begin(), { s.title, s.what, s.out, s.error, s.phase == JobState::Done });
                     if (recent.size() > 10) recent.pop_back();
@@ -418,7 +422,14 @@ struct App {
 
     void StartTour()
     {
-        tour.Start([this] { return wheel.opens(); }, [this] { return choices; });
+        TourSignals sig;
+        sig.wheels = [this] { return wheel.opens(); };
+        sig.choices = [this] { return choices; };
+        sig.results = [this] { return made; };
+        sig.dragging = [this] { return trigger.fileDrag(); };
+        sig.wheelOpen = [this] { return wheel.open(); };
+        sig.stranded = [this] { return wheel.stranded(); };
+        tour.Start(std::move(sig));
     }
 
     void Chosen(const WheelOption& o, const std::vector<wstring>& paths, POINT at)
@@ -636,12 +647,20 @@ struct App {
         wheel.ShowForKeyboard(paths);
     }
 
-    /// The tour's practice file: a picture in Roda's own folder, shown selected in Explorer, ready to drag.
-    void Practice()
+    /// The tour's practice picture, in Roda's own folder (made the first time); empty if it can't be.
+    wstring PracticeFile()
     {
         wstring dir = JoinPath(DataDir(), L"Practice"), png = JoinPath(dir, L"Practice picture.png");
         EnsureDir(dir);
-        if (!FileExists(png) && !DrawPractice(png)) { cards.AnchorAt(CursorPos()); cards.Note(L"Practice file", L"Could not make the practice picture.", true); return; }
+        if (!FileExists(png) && !DrawPractice(png)) { cards.AnchorAt(CursorPos()); cards.Note(L"Practice file", L"Could not make the practice picture.", true); return L""; }
+        return png;
+    }
+
+    /// The practice picture shown selected in Explorer, for dragging from there instead.
+    void Practice()
+    {
+        wstring png = PracticeFile();
+        if (png.empty()) return;
         PIDLIST_ABSOLUTE pidl = ILCreateFromPathW(png.c_str());
         if (pidl) { SHOpenFolderAndSelectItems(pidl, 0, nullptr, 0); ILFree(pidl); }
         Log(L"tour: practice file at %s", png.c_str());
