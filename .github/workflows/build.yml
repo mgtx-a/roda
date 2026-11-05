@@ -109,9 +109,20 @@ jobs:
           SUMS: ${{ steps.sum.outputs.sums }}
         run: |
           cat > notes.md <<EOF
-          **Full** (pictures, PDFs, documents, spreadsheets, archives): download **Roda-x64-full.zip**
-          (most PCs) or **Roda-arm64-full.zip** (Windows on ARM), unzip it anywhere and run Roda.exe.
-          **Lite** (everything except PDFs, a single file): **Roda-x64.exe** or **Roda-arm64.exe**.
+          ## Which file do I download?
+
+          | | **Full** (recommended) | **Lite** |
+          |---|---|---|
+          | Most PCs (Intel / AMD) | **Roda-x64-full.zip** | **Roda-x64.exe** |
+          | Windows on ARM (Snapdragon) | **Roda-arm64-full.zip** | **Roda-arm64.exe** |
+          | How to start | Unzip anywhere, keep the folder together, run Roda.exe | One file: just run it |
+          | Size | about 10 MB | about 2 MB |
+          | Photos, documents, spreadsheets, ZIP / TAR, subtitles | ✅ | ✅ |
+          | **PDFs** (to Word, sign, merge, remove pages…) | ✅ | ❌ |
+          | **Audio** (MP3, WAV, FLAC…) | ✅ | ❌ |
+          | **Video** (MP4, trim, GIF…) | ✅ | ❌ |
+
+          Not sure which PC you have? **Settings → System → About → System type** says *x64-based* or *ARM-based*.
           No installer and no runtime needed (Windows 10 / 11).
 
           Built by GitHub Actions from commit ${GITHUB_SHA}. Verify with:
